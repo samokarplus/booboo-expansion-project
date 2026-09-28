@@ -1,0 +1,48 @@
+# Local Python environment and caches
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.cookies
+cookies.txt
+
+# Runtime state, logs, and temporary files
+state.json
+ledger.json
+config.json
+run.lock
+PAUSED
+*.log
+*.tmp
+*.part
+.DS_Store
+
+# Downloaded source media and generated clip artifacts
+*.mp4
+*.mov
+*.mkv
+*.webm
+*.mp3
+*.wav
+*.m4a
+*.aac
+clips.csv
+AUTOPILOT_STATUS.txt
+.work/
+PURSUIT_CLIPS/
+
+# Editor files
+.idea/
+.vscode/
+*~

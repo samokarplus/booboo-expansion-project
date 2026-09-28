@@ -1,0 +1,9 @@
+#!/bin/bash
+# Launcher: ./pursuit-clips "YOUTUBE_URL"
+DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"   # works through the ~/.local/bin symlink
+if [ ! -x "$DIR/.venv/bin/python" ]; then
+  echo "Setup hasn't been run yet. Run:  \"$DIR/setup.sh\"" >&2
+  exit 1
+fi
+export PATH="/opt/homebrew/bin:$HOME/.local/bin:$PATH"
+exec "$DIR/.venv/bin/python" "$DIR/pursuit_clips.py" "$@"

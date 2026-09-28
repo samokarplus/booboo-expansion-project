@@ -1,0 +1,959 @@
+#!/usr/bin/env python3
+"""PURSUIT autopilot: new episode on YouTube -> clips -> quality checks -> scheduled posts.
+
+Runs from launchd a few times a day. Each run:
+  1. reconciles already-scheduled posts (did they actually go out?)
+  2. looks for a new full episode on the channel
+  3. if there is one: renders clips with pursuit_clips.py, checks every clip, and
+     schedules the good ones on Post for Me (YouTube Shorts + Instagram Reels + TikTok),
+     one clip per day.
+
+Fail closed: anything unexpected means nothing gets posted and you get a notification.
+
+    ./autopilot setup            one-time: API key + connect accounts
+    ./autopilot run              what launchd runs (safe to run by hand)
+    ./autopilot run --dry-run    everything except creating posts
+    ./autopilot status           what's scheduled / posted / failed
+    ./autopilot pause | resume
+    ./autopilot process URL      push one specific episode through (e.g. the current one)
+    ./autopilot test-post        verifies API + accounts with a draft that is never published
+"""
+
+import argparse
+import datetime as dt
+import fcntl
+import json
+import os
+import re
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import pursuit_clips as pc  # noqa: E402  (reuse probe/ffmpeg helpers and the Claude CLI wrapper)
+
+CHANNEL_URL = "https://www.youtube.com/@PursuitThePod/videos"   # /videos = long-form only, no Shorts
+OUT_DIR = Path(os.environ.get("PURSUIT_OUT", pc.DEFAULT_OUT))    # env overrides are for testing
+STATE_DIR = Path(os.environ.get("PURSUIT_STATE_DIR", Path.home() / "Library" / "Application Support" / "PURSUIT_AUTOPILOT"))
+STATE_FILE = STATE_DIR / "state.json"      # episodes seen / processed
+LEDGER_FILE = STATE_DIR / "ledger.json"    # every post we ever created
+CONFIG_FILE = STATE_DIR / "config.json"    # connected account ids
+LOG_FILE = Path(os.environ.get("PURSUIT_LOG", Path.home() / "Library" / "Logs" / "pursuit-autopilot.log"))
+STATUS_FILE = OUT_DIR / "AUTOPILOT_STATUS.txt"
+PAUSE_FILE = STATE_DIR / "PAUSED"
+LOCK_FILE = STATE_DIR / "run.lock"
+
+API = os.environ.get("PURSUIT_POSTFORME_API", "https://api.postforme.dev")
+KEYCHAIN_SERVICE = "pursuit-postforme-api-key"
+PLATFORMS = ["youtube", "instagram", "tiktok"]
+
+# --- policy ---------------------------------------------------------------------------
+TZ = ZoneInfo(os.environ.get("PURSUIT_TZ", "America/Denver"))
+POST_HOUR = 17                 # one clip per day at 5pm local time
+MAX_CLIPS_RENDER = 8
+MAX_CLIPS_POST = 7             # a week's worth
+MIN_POST_SCORE = 70            # Claude's overall score needed to publish
+MIN_STANDALONE = 7             # clip must make sense without context
+MIN_EPISODE_MINUTES = 6        # shorter uploads are vlogs/trailers, not episodes
+MIN_CLIP_SEC, MAX_CLIP_SEC = 12, 90
+MAX_FAIL_FRACTION = 0.5        # if more than half the clips fail checks, trust nothing from this episode
+MAX_ATTEMPTS = 3               # retries per episode before giving up (and telling you)
+
+
+# ------------------------------------------------------------------------------ plumbing
+
+def now():
+    return dt.datetime.now(TZ)
+
+
+def log(msg):
+    line = f"[{now():%Y-%m-%d %H:%M:%S}] {msg}"
+    print(line, flush=True)
+    LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(line + "\n")
+
+
+def notify(title, msg):
+    """macOS notification + log line. Never raises."""
+    log(f"NOTIFY {title}: {msg}")
+    safe = lambda s: s.replace("\\", "").replace('"', "'")[:230]
+    subprocess.run(["osascript", "-e", f'display notification "{safe(msg)}" with title "{safe(title)}" sound name "Glass"'],
+                   capture_output=True)
+
+
+def load(path, default):
+    try:
+        return json.loads(Path(path).read_text())
+    except FileNotFoundError:
+        return default
+
+
+def save(path, data):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, 0o600)
+    tmp.replace(path)
+    # Make the rename durable across a sudden shutdown, not just process crashes.
+    directory_fd = os.open(path.parent, os.O_RDONLY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+class Stop(Exception):
+    """Fail-closed stop with a human message."""
+
+
+# ------------------------------------------------------------------------------ Post for Me API
+
+class Ambiguous(Exception):
+    """We can't tell whether the request took effect (timeout / 5xx). Never retry blindly."""
+
+
+def api_key():
+    key = os.environ.get("PURSUIT_POSTFORME_KEY")
+    if key:
+        return key
+    r = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE, "-w"], capture_output=True, text=True)
+    if r.returncode != 0 or not r.stdout.strip():
+        raise Stop("Post for Me API key not set up. Run: ./autopilot setup")
+    return r.stdout.strip()
+
+
+API_TIMEOUT = 60
+
+
+def api(method, path, body=None, query=None, timeout=None):
+    timeout = timeout or API_TIMEOUT
+    url = API + path
+    if query:
+        url += "?" + "&".join(f"{k}={urllib.request.quote(str(v))}" for k, vals in query.items()
+                              for v in (vals if isinstance(vals, list) else [vals]))
+    data = json.dumps(body).encode() if body is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers={
+        "Authorization": f"Bearer {api_key()}", "Content-Type": "application/json", "User-Agent": "pursuit-autopilot"})
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            raw = r.read()
+            return json.loads(raw) if raw else {}
+    except urllib.error.HTTPError as e:
+        try:
+            detail = e.read().decode(errors="replace")[:500]
+        finally:
+            e.close()
+        if e.code in (401, 403):
+            raise Stop(f"Post for Me rejected the API key ({e.code}). Run ./autopilot setup again.")
+        if e.code >= 500:
+            raise Ambiguous(f"Post for Me server error {e.code} on {method} {path}: {detail}")
+        raise Stop(f"Post for Me refused {method} {path} ({e.code}): {detail}")
+    except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+        raise Ambiguous(f"No clear answer from Post for Me on {method} {path}: {e}")
+    except json.JSONDecodeError:
+        raise Ambiguous(f"Post for Me returned non-JSON on {method} {path}")
+
+
+def upload_media(mp4):
+    r = api("POST", "/v1/media/create-upload-url", {})
+    if not r.get("upload_url") or not r.get("media_url"):
+        raise Stop("Post for Me returned an incomplete upload-url response.")
+    # curl streams the file and gives a clean exit code; -f fails on HTTP errors
+    up = subprocess.run(["curl", "-sS", "-f", "-X", "PUT", "-H", "Content-Type: video/mp4",
+                         "--upload-file", str(mp4), r["upload_url"]], capture_output=True, text=True, timeout=900)
+    if up.returncode != 0:
+        raise Stop(f"Uploading {mp4.name} failed: {up.stderr.strip()[:300]}")
+    return r["media_url"]
+
+
+def connected_accounts():
+    r = api("GET", "/v1/social-accounts", query={"status": "connected", "limit": 50})
+    return r.get("data", [])
+
+
+def find_posts_by_external_id(external_id):
+    return api("GET", "/v1/social-posts", query={"external_id": external_id, "limit": 10}).get("data", [])
+
+
+def configured_accounts(config):
+    """Return configured live accounts, failing closed on wrong-platform or duplicate IDs."""
+    wanted = config.get("accounts") or {}
+    missing = [p for p in PLATFORMS if p not in wanted]
+    if missing:
+        raise Stop(f"Accounts not connected: {', '.join(missing)}. Run ./autopilot setup")
+    live = connected_accounts()
+    by_id = {}
+    for account in live:
+        account_id = account.get("id")
+        if account_id in by_id:
+            raise Stop(f"Post for Me returned duplicate account id {account_id}; not posting.")
+        by_id[account_id] = account
+    verified = {}
+    for platform in PLATFORMS:
+        account = by_id.get(wanted[platform])
+        if not account:
+            raise Stop(f"Post for Me says the configured {platform} account is disconnected. Run ./autopilot setup")
+        if account.get("platform") != platform:
+            raise Stop(f"Configured {platform} account is actually {account.get('platform')}; not posting. Run ./autopilot setup")
+        verified[platform] = account
+    return verified
+
+
+def _post_account_ids(post):
+    result = []
+    for account in post.get("social_accounts") or []:
+        result.append(account.get("id") if isinstance(account, dict) else account)
+    return result
+
+
+def validate_post(post, external_id, account_ids, when, newly_created):
+    """A response is usable only if it describes exactly the post we intended."""
+    if not isinstance(post, dict) or not post.get("id"):
+        raise Stop("Post for Me returned a post without an id; not continuing.")
+    if post.get("external_id") != external_id:
+        raise Stop("Post for Me returned a mismatched external_id; not continuing.")
+    if set(_post_account_ids(post)) != set(account_ids):
+        raise Stop("Post for Me returned different destination accounts; not continuing.")
+    returned_at = post.get("scheduled_at")
+    try:
+        scheduled = dt.datetime.fromisoformat(returned_at.replace("Z", "+00:00"))
+    except (AttributeError, ValueError):
+        raise Stop("Post for Me did not confirm the scheduled time; not continuing.")
+    if newly_created and abs((scheduled - when.astimezone(dt.timezone.utc)).total_seconds()) > 2:
+        raise Stop("Post for Me confirmed a different scheduled time; not continuing.")
+    allowed = {"scheduled"} if newly_created else {"scheduled", "processing", "processed"}
+    if post.get("status") not in allowed:
+        raise Stop(f"Post for Me returned status {post.get('status')!r}; not continuing.")
+    return post
+
+
+# ------------------------------------------------------------------------------ 1. episode detection
+
+def latest_episodes(limit=5):
+    r = subprocess.run(["yt-dlp", "--flat-playlist", "--playlist-end", str(limit), "-J", "--no-warnings", CHANNEL_URL],
+                       capture_output=True, text=True, timeout=180)
+    if r.returncode != 0:
+        raise Stop("Couldn't read the PURSUIT channel (yt-dlp). Try: brew upgrade yt-dlp deno\n" + r.stderr[-300:])
+    entries = json.loads(r.stdout).get("entries") or []
+    eps = []
+    for e in entries:
+        if e.get("live_status") in ("is_upcoming", "is_live") or not e.get("duration"):
+            continue   # premieres / livestreams: wait until they're normal videos
+        if e["duration"] < MIN_EPISODE_MINUTES * 60:
+            continue
+        eps.append({"id": e["id"], "title": e.get("title", ""), "duration": e["duration"],
+                    "url": f"https://www.youtube.com/watch?v={e['id']}"})
+    return eps   # newest first
+
+
+# ------------------------------------------------------------------------------ 2. render
+
+BURNED_IN_BAND = "0.10:0.80"   # Anya's own captions sit in the bottom ~18% of the frame; use the band above them
+
+
+def render_episode(url, band=None, ep_dir=None):
+    summary = Path(tempfile.mkstemp(prefix="pursuit_summary_", suffix=".json")[1])
+    summary.unlink()
+    # call python directly (not the bash launcher): launchd may not let /bin/bash read files in ~/Documents
+    cmd = [sys.executable, str(HERE / "pursuit_clips.py"), url, "--max", str(MAX_CLIPS_RENDER), "--out", str(OUT_DIR),
+           "--summary-json", str(summary), "--keep-source"]
+    if band:
+        # same picks as before (analysis is cached); re-render the videos from the top part of the frame only
+        cmd += ["--crop-band", band, "--force-render"]
+    log("Rendering clips: " + " ".join(cmd[1:]))
+    env = dict(os.environ, PURSUIT_NO_OPEN="1",
+               PATH="/opt/homebrew/bin:" + str(Path.home() / ".local/bin") + ":" + os.environ.get("PATH", "/usr/bin:/bin"))
+    # caffeinate: keep the Mac awake while this runs (it takes 15-25 minutes)
+    r = subprocess.run(["caffeinate", "-i", *cmd], capture_output=True, text=True, env=env, timeout=4 * 3600)
+    with open(LOG_FILE, "a", encoding="utf-8") as f:
+        f.write(r.stdout[-6000:] + r.stderr[-3000:])
+    if r.returncode != 0 or not summary.exists():
+        err = (r.stderr.strip().splitlines() or ["unknown error"])
+        raise Stop("Clip pipeline failed: " + " ".join(err[-4:])[:400])
+    data = json.loads(summary.read_text())
+    summary.unlink()
+    return data
+
+
+def cleanup_source(summary):
+    """Remove the full episode after a completed verdict; failed runs keep it for resume."""
+    work = Path(summary["ep_dir"]) / ".work"
+    for source in work.glob("source.*"):
+        source.unlink(missing_ok=True)
+
+
+# ------------------------------------------------------------------------------ 3. quality checks
+
+def technical_checks(ffmpeg, ffprobe, clip, ep_dir, words, captions):
+    """Returns a list of problems (empty = passed)."""
+    problems = []
+    mp4 = Path(ep_dir) / clip["file"]
+    if not mp4.exists() or mp4.stat().st_size < 200_000:
+        return [f"missing or tiny file {mp4.name}"]
+    r = subprocess.run([ffprobe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format", str(mp4)],
+                       capture_output=True, text=True)
+    try:
+        d = json.loads(r.stdout)
+    except json.JSONDecodeError:
+        return ["ffprobe could not read the file"]
+    v = [s for s in d.get("streams", []) if s["codec_type"] == "video"]
+    a = [s for s in d.get("streams", []) if s["codec_type"] == "audio"]
+    if len(v) != 1 or v[0].get("codec_name") != "h264" or (v[0].get("width"), v[0].get("height")) != (1080, 1920):
+        problems.append("video stream is not a single 1080x1920 H.264 track")
+    if len(a) != 1 or a[0].get("codec_name") != "aac":
+        problems.append("no AAC audio track")
+    dur = float(d.get("format", {}).get("duration", 0))
+    if not MIN_CLIP_SEC <= dur <= MAX_CLIP_SEC:
+        problems.append(f"duration {dur:.1f}s outside {MIN_CLIP_SEC}-{MAX_CLIP_SEC}s")
+    if abs(dur - float(clip["duration_sec"])) > 0.8:
+        problems.append(f"duration {dur:.1f}s doesn't match planned {clip['duration_sec']}s")
+    # full decode: catches corruption anywhere in the file
+    dec = subprocess.run([ffmpeg, "-v", "error", "-i", str(mp4), "-f", "null", "-"], capture_output=True, text=True)
+    if dec.returncode != 0 or dec.stderr.strip():
+        problems.append("decode errors: " + dec.stderr.strip()[:150])
+    # audio must not be silent
+    vol = subprocess.run([ffmpeg, "-i", str(mp4), "-vn", "-af", "volumedetect", "-f", "null", "-"], capture_output=True, text=True)
+    m = re.search(r"mean_volume: (-?[\d.]+) dB", vol.stderr)
+    if not m or float(m.group(1)) < -40:
+        problems.append("audio is silent or unreadable")
+    # boundaries: no word may straddle the cut
+    s, e = float(clip["start_sec"]), float(clip["end_sec"])
+    for w in words:
+        if w["s"] + 0.02 < s < w["e"] - 0.02:
+            problems.append(f"starts mid-word ('{w['w']}')")
+        if w["s"] + 0.02 < e < w["e"] - 0.02:
+            problems.append(f"ends mid-word ('{w['w']}')")
+    inside = [w for w in words if w["s"] >= s - 0.05 and w["e"] <= e + 0.05]
+    wps = len(inside) / max(dur, 1)
+    if not 1.2 <= wps <= 5.5:
+        problems.append(f"odd speech rate ({wps:.1f} words/s): transcript may be wrong")
+    toks = [re.sub(r"\W", "", w["w"].lower()) for w in inside]
+    # Whisper glitches repeat whole phrases; people repeat short ones ("constantly, constantly, constantly")
+    grams = [" ".join(toks[i:i + 6]) for i in range(len(toks) - 5)]
+    if grams and max(grams.count(g) for g in set(grams)) >= 3:
+        problems.append("repeated phrase loop: looks like a transcription glitch")
+    copy = (Path(ep_dir) / clip["folder"] / "copy.txt")
+    if not copy.exists():
+        problems.append("copy.txt missing")
+    return problems
+
+
+def score_checks(clip, analysis_clip):
+    problems = []
+    overall = float(analysis_clip.get("overall") or 0)
+    standalone = float((analysis_clip.get("scores") or {}).get("standalone") or 0)
+    if overall < MIN_POST_SCORE:
+        problems.append(f"score {overall:.0f} < {MIN_POST_SCORE}")
+    if standalone < MIN_STANDALONE:
+        problems.append(f"standalone {standalone:.0f} < {MIN_STANDALONE}")
+    for field, limit in (("youtube_title", 95), ("caption", 1800)):
+        val = (analysis_clip.get(field) or "").strip()
+        if not val:
+            problems.append(f"missing {field}")
+        elif len(val) > limit:
+            problems.append(f"{field} too long")
+    return problems
+
+
+QC_PROMPT = """You are the final quality gate before a short vertical video is published publicly under a creator's brand.
+Read the image file {sheet}: 6 frames sampled evenly across the clip, left to right, top to bottom (each frame 1080x1920, shown smaller).
+Burned-in captions {cap_note}. On-screen hook (first seconds only, may appear in frame 1): {hook!r}.
+Transcript of the clip:
+\"\"\"{transcript}\"\"\"
+
+Only flag SERIOUS problems that would embarrass the creator or make the clip unwatchable:
+- two different caption layers (e.g. captions already baked into the source video plus ours)
+- the speaker's face is cut off or missing in most frames (for an audio-only logo layout this is expected and fine)
+- black, frozen, glitched, or corrupted frames
+- captions unreadable or wildly mismatched with the transcript
+- transcript is incoherent/garbled or clearly not what a person would say
+- anything offensive, private, or clearly not meant to be public
+Do NOT flag normal things: hands or objects near captions, a caption caught mid-transition, framing that isn't perfect, casual speech.
+
+Reply with ONLY JSON: {{"publish": true|false, "double_captions": true|false, "issues": ["..."]}}"""
+
+
+def contact_sheet(ffmpeg, mp4, out_jpg, dur):
+    subprocess.run([ffmpeg, "-v", "error", "-y", "-i", str(mp4), "-vf",
+                    f"fps=6/{max(dur, 1):.2f},scale=360:-2,tile=3x2", "-frames:v", "1", str(out_jpg)],
+                   capture_output=True, check=True)
+
+
+def claude_visual_qc(ffmpeg, clip, ep_dir, analysis_clip, captions, transcript_text):
+    claude = pc.find_claude()
+    if not claude:
+        raise Stop("Claude Code CLI not found (needed for the final quality check).")
+    with tempfile.TemporaryDirectory(prefix="pursuit_qc_") as tmp:
+        sheet = Path(tmp) / "sheet.jpg"
+        contact_sheet(ffmpeg, Path(ep_dir) / clip["file"], sheet, float(clip["duration_sec"]))
+        prompt = QC_PROMPT.format(sheet=sheet.name, hook=analysis_clip.get("onscreen_hook"),
+                                  cap_note="were added by our tool (one layer expected)" if captions else "were NOT added by our tool",
+                                  transcript=transcript_text[:3000])
+        cmd = [claude, "-p", "--output-format", "json", "--no-session-persistence",
+               "--tools", "Read", "--allowedTools", "Read", "--add-dir", tmp]
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=tmp, timeout=300)
+    try:
+        env = json.loads(r.stdout)
+        if env.get("is_error"):
+            raise ValueError(env.get("result"))
+        text = env.get("result") or ""
+        verdict = json.JSONDecoder().raw_decode(text[text.index("{"):])[0]
+        if not isinstance(verdict.get("publish"), bool):
+            raise ValueError("no publish field")
+        return verdict
+    except (ValueError, KeyError, json.JSONDecodeError) as e:
+        raise Stop(f"Claude's quality check reply was unusable ({e}); not publishing.")
+
+
+def check_episode(summary, use_claude=True, check_all_visually=False):
+    """Run every check on every clip. Returns (passed_clips, report_lines, double_caption_votes, broken_fraction)."""
+    ffmpeg, ffprobe = pc.find_ffmpeg()
+    ep_dir = Path(summary["ep_dir"])
+    words = json.loads(Path(summary["transcript"]).read_text())["words"]
+    analysis = json.loads((ep_dir / ".work" / "analysis.json").read_text())
+    by_title = {c.get("clip_title", ""): c for c in analysis["clips"]}
+    passed, report, doubles, eligible, broken = [], [], 0, 0, 0
+    for clip in summary["clips"]:
+        ac = by_title.get(clip["clip_title"])
+        problems = ["can't match clip to Claude's analysis"] if ac is None else []
+        if ac is not None:
+            quality = score_checks(clip, ac)
+            tech = technical_checks(ffmpeg, ffprobe, clip, ep_dir, words, summary["captions"])
+            problems += quality + tech
+            if not quality:
+                eligible += 1
+                broken += bool(tech)
+        # visual QC on passing clips; the top-scored clip always gets looked at (it reveals burned-in captions early)
+        if use_claude and (not problems or check_all_visually or clip is summary["clips"][0]) and ac is not None:
+            text = " ".join(w["w"] for w in words if clip["start_sec"] - 0.05 <= w["s"] and w["e"] <= clip["end_sec"] + 0.05)
+            v = claude_visual_qc(ffmpeg, clip, ep_dir, ac, summary["captions"], text)
+            if v.get("double_captions"):
+                doubles += 1
+            if not v["publish"]:
+                broken += not problems and not quality
+                problems.append("visual QC: " + "; ".join(v.get("issues") or ["rejected"]))
+        status = "PASS" if not problems else "SKIP"
+        report.append(f"{status} {clip['folder']} (score {clip.get('score')}): " + ("ok" if not problems else "; ".join(problems)))
+        log("  " + report[-1])
+        if not problems:
+            passed.append(dict(clip, analysis=ac))
+    # "broken" = clips good enough to post that failed a technical/visual check: a sign the pipeline misbehaved
+    return passed, report, doubles, (broken / eligible if eligible else 0.0)
+
+
+# ------------------------------------------------------------------------------ 4. schedule + publish
+
+def next_slots(ledger, n):
+    """One slot per day at POST_HOUR, starting after the last already-scheduled post (never stacking)."""
+    last = max((dt.datetime.fromisoformat(p["scheduled_at"]) for p in ledger["posts"]), default=None)
+    t = now() + dt.timedelta(hours=1)
+    day = t.date() if t.hour < POST_HOUR else t.date() + dt.timedelta(days=1)
+    if last and last.astimezone(TZ).date() >= day:
+        day = last.astimezone(TZ).date() + dt.timedelta(days=1)
+    return [dt.datetime.combine(day + dt.timedelta(days=i), dt.time(POST_HOUR), TZ) for i in range(n)]
+
+
+def hashtags(ac):
+    return " ".join("#" + re.sub(r"\W", "", h.lstrip("#")) for h in (ac.get("hashtags") or [])[:5] if h)
+
+
+def build_post(clip, meta, accounts, media_url, when, external_id):
+    ac = clip["analysis"]
+    caption = (ac.get("caption") or "").strip()
+    tags = hashtags(ac)
+    social_caption = caption + (f"\n\n{tags}" if tags else "")
+    yt_desc = (f"{caption}\n\nFull episode: {meta['title']}\n{meta['url']}\n\n"
+               f"PURSUIT with Anya Postnikov\n{tags} #shorts").strip()
+    return {
+        "caption": social_caption,
+        "social_accounts": [accounts[p] for p in PLATFORMS],
+        "media": [{"url": media_url}],
+        "scheduled_at": when.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
+        "external_id": external_id,
+        "platform_configurations": {
+            "youtube": {"title": ac["youtube_title"][:95], "description": yt_desc[:4900], "privacy_status": "public",
+                        "made_for_kids": False, "tags": [t.lstrip("#") for t in tags.split()][:10]},
+            "instagram": {"placement": "reels", "share_to_feed": True},
+            "tiktok": {"privacy_status": "public", "allow_comment": True, "allow_duet": True, "allow_stitch": True,
+                       "disclose_your_brand": False, "disclose_branded_content": False, "is_ai_generated": False},
+        },
+    }
+
+
+def schedule_clips(passed, summary, dry_run):
+    cfg = load(CONFIG_FILE, {})
+    accounts = cfg.get("accounts") or {}
+    ledger = load(LEDGER_FILE, {"posts": []})
+    meta = summary["meta"]
+    todo = [c for c in sorted(passed, key=lambda c: -float(c.get("score") or 0))[:MAX_CLIPS_POST]]
+    todo = [c for c in todo if not any(p["external_id"] == ext_id(meta, c) for p in ledger["posts"])]
+    if not todo:
+        log("Nothing new to schedule.")
+        return []
+    if not dry_run:
+        configured_accounts(cfg)
+    slots = next_slots(ledger, len(todo))
+    done = []
+    for clip, when in zip(todo, slots):
+        eid = ext_id(meta, clip)
+        mp4 = Path(summary["ep_dir"]) / clip["file"]
+        if dry_run:
+            log(f"  [dry-run] would schedule {clip['folder']} for {when:%a %b %d %H:%M} -> {', '.join(PLATFORMS)}")
+            done.append(eid)
+            continue
+        # idempotency: if a post with this id exists (e.g. an earlier run timed out), adopt it; never post twice
+        existing = find_posts_by_external_id(eid)
+        if len(existing) > 1:
+            raise Stop(f"Multiple Post for Me posts have external_id {eid}; not posting or guessing.")
+        if existing:
+            post = validate_post(existing[0], eid, [accounts[p] for p in PLATFORMS], when, newly_created=False)
+            when = dt.datetime.fromisoformat(post["scheduled_at"].replace("Z", "+00:00")).astimezone(TZ)
+            log(f"  found existing post for {eid}; not creating another")
+        else:
+            media_url = upload_media(mp4)
+            body = build_post(clip, meta, accounts, media_url, when, eid)
+            try:
+                post = api("POST", "/v1/social-posts", body)
+            except Ambiguous as e:
+                # record it as unknown so the next run looks it up instead of re-posting
+                ledger["posts"].append({"external_id": eid, "status": "unknown", "scheduled_at": when.isoformat(),
+                                        "clip": clip["folder"], "episode": meta["id"], "error": str(e)})
+                save(LEDGER_FILE, ledger)
+                raise Stop(f"Unclear whether {clip['folder']} was scheduled: {e}. Will check again next run.")
+            post = validate_post(post, eid, [accounts[p] for p in PLATFORMS], when, newly_created=True)
+        ledger["posts"].append({"external_id": eid, "post_id": post["id"], "status": "scheduled",
+                                "scheduled_at": when.isoformat(), "clip": clip["folder"], "episode": meta["id"],
+                                "episode_title": meta["title"], "youtube_title": clip["analysis"]["youtube_title"],
+                                "file": str(mp4), "results": {}})
+        save(LEDGER_FILE, ledger)
+        log(f"  scheduled {clip['folder']} for {when:%a %b %d %H:%M} (post {post['id']})")
+        done.append(eid)
+    return done
+
+
+def ext_id(meta, clip):
+    return f"pursuit-{meta['id']}-{clip['folder'][:40]}"
+
+
+# ------------------------------------------------------------------------------ 5. reconcile
+
+def youtube_is_public(url):
+    r = subprocess.run(["yt-dlp", "--simulate", "--no-warnings", "-q", url], capture_output=True, text=True, timeout=120)
+    return r.returncode == 0
+
+
+def reconcile(dry_run=False):
+    """Check posts whose time has passed. Records links; notifies on anything that didn't go out."""
+    ledger = load(LEDGER_FILE, {"posts": []})
+    cfg = load(CONFIG_FILE, {})
+    accounts = cfg.get("accounts") or {}
+    if any(p.get("status") in ("unknown", "scheduled") for p in ledger["posts"]):
+        configured_accounts(cfg)
+    changed, problems, published = False, [], []
+    for p in ledger["posts"]:
+        if p["status"] == "unknown":   # an earlier create timed out: look it up by external id
+            found = find_posts_by_external_id(p["external_id"])
+            if len(found) > 1:
+                raise Stop(f"Multiple Post for Me posts have external_id {p['external_id']}; not guessing.")
+            if found:
+                post = validate_post(found[0], p["external_id"], [accounts[x] for x in PLATFORMS],
+                                     dt.datetime.fromisoformat(p["scheduled_at"]), newly_created=False)
+                remote_when = dt.datetime.fromisoformat(post["scheduled_at"].replace("Z", "+00:00")).astimezone(TZ)
+                p.update(post_id=post["id"], status="scheduled", scheduled_at=remote_when.isoformat(), results={})
+                log(f"Resolved earlier timeout: {p['clip']} does exist ({found[0]['id']}).")
+            else:
+                p["status"] = "not_created"
+                problems.append(f"{p['clip']}: earlier scheduling attempt didn't go through (not re-posting automatically).")
+            changed = True
+        if p["status"] != "scheduled":
+            continue
+        due = dt.datetime.fromisoformat(p["scheduled_at"])
+        if now() < due + dt.timedelta(minutes=20):
+            continue
+        res = api("GET", "/v1/social-post-results", query={"post_id": p["post_id"], "limit": 10}).get("data", [])
+        by_acct = {r["social_account_id"]: r for r in res}
+        pending = [plat for plat in PLATFORMS if accounts.get(plat) not in by_acct]
+        if pending:
+            if now() > due + dt.timedelta(hours=6):
+                problems.append(f"{p['clip']}: no result from {', '.join(pending)} 6h after posting time.")
+                p["status"] = "unclear"
+                changed = True
+            continue
+        for plat in PLATFORMS:
+            r = by_acct[accounts[plat]]
+            url = (r.get("platform_data") or {}).get("url")
+            p["results"][plat] = {"success": bool(r.get("success")), "url": url, "error": r.get("error")}
+            if not r.get("success"):
+                problems.append(f"{p['clip']} failed on {plat}: {str(r.get('error'))[:120]}")
+        yt = p["results"].get("youtube", {})
+        if yt.get("success") and yt.get("url") and not youtube_is_public(yt["url"]):
+            problems.append(f"{p['clip']}: YouTube upload exists but isn't publicly viewable ({yt['url']}).")
+        p["status"] = "posted" if all(v["success"] for v in p["results"].values()) else "partial"
+        published.append(p)
+        changed = True
+    if changed:
+        save(LEDGER_FILE, ledger)
+    for p in published:
+        log(f"Posted: {p['clip']} -> " + ", ".join(f"{k}: {v.get('url') or v.get('error')}" for k, v in p["results"].items()))
+    if problems:
+        notify("PURSUIT autopilot: posting problem", " | ".join(problems))
+    return published, problems
+
+
+# ------------------------------------------------------------------------------ run
+
+def process_episode(ep, state, dry_run, use_claude=True):
+    rec = state["episodes"].setdefault(ep["id"], {"title": ep["title"], "attempts": 0})
+    rec["attempts"] += 1
+    rec["last_attempt"] = now().isoformat()
+    if not dry_run:
+        save(STATE_FILE, state)
+    log(f"New episode: {ep['title']} ({ep['url']}), attempt {rec['attempts']}")
+    summary = render_episode(ep["url"])
+    passed, report, doubles, broken_frac = check_episode(summary, use_claude)
+    if doubles:
+        log("QC saw captions burned into the source video: re-rendering from the top of the frame (drops her caption band).")
+        summary = render_episode(ep["url"], band=BURNED_IN_BAND, ep_dir=summary["ep_dir"])
+        passed, report, doubles, broken_frac = check_episode(summary, use_claude, check_all_visually=True)
+        if doubles:
+            passed = []
+            report.append("Burned-in captions still visible after re-cropping.")
+    n = len(summary["clips"])
+    suspect = broken_frac > MAX_FAIL_FRACTION
+    if n == 0 or len(passed) == 0 or suspect:
+        rec.update(status="rejected", report=report)   # a verdict, not a crash: don't retry this episode
+        if not dry_run:
+            save(STATE_FILE, state)
+        cleanup_source(summary)
+    if n == 0 or len(passed) == 0:
+        raise Stop(f"No clip from '{ep['title']}' passed the checks. Nothing posted.\n" + "\n".join(report))
+    if suspect:
+        raise Stop(f"Most postable clips from '{ep['title']}' failed checks, so the whole batch is suspect. Nothing posted.\n"
+                   + "\n".join(report))
+    scheduled = schedule_clips(passed, summary, dry_run)
+    cleanup_source(summary)
+    rec.update(status="dry_run" if dry_run else "done", clips_rendered=n, clips_passed=len(passed),
+               scheduled=scheduled, report=report, finished=now().isoformat())
+    if not dry_run:
+        state["last_processed_video_id"] = ep["id"]
+    if not dry_run:
+        save(STATE_FILE, state)
+    msg = f"{len(scheduled)} clips {'would be ' if dry_run else ''}scheduled from '{ep['title']}' ({n - len(passed)} held back)."
+    notify("PURSUIT autopilot", msg)
+    return msg
+
+
+def write_status(extra=""):
+    ledger = load(LEDGER_FILE, {"posts": []})
+    state = load(STATE_FILE, {})
+    lines = [f"PURSUIT autopilot status, updated {now():%a %b %d %Y %H:%M}", ""]
+    if PAUSE_FILE.exists():
+        lines += ["*** PAUSED *** (run ./autopilot resume to turn back on)", ""]
+    if extra:
+        lines += [extra, ""]
+    lines.append(f"Last processed episode: {state.get('last_processed_video_id', '(none yet)')}")
+    upcoming = [p for p in ledger["posts"] if p["status"] == "scheduled"]
+    lines += ["", f"Scheduled ({len(upcoming)}):"]
+    lines += [f"  {dt.datetime.fromisoformat(p['scheduled_at']):%a %b %d %H:%M}  {p['clip']}" for p in upcoming]
+    recent = [p for p in ledger["posts"] if p["status"] != "scheduled"][-10:]
+    lines += ["", "Recent:"]
+    for p in recent:
+        links = " ".join(f"{k}:{v.get('url') or 'FAILED'}" for k, v in (p.get("results") or {}).items())
+        lines.append(f"  [{p['status']}] {p['clip']}  {links}")
+    lines += ["", f"Full log: {LOG_FILE}"]
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    STATUS_FILE.write_text("\n".join(lines) + "\n")
+
+
+def cmd_run(args, only_url=None):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    lock = open(LOCK_FILE, "w")
+    try:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        log("Another run is in progress; exiting.")
+        lock.close()
+        return
+    if PAUSE_FILE.exists() and not only_url:
+        log("Paused; exiting.")
+        write_status()
+        lock.close()
+        return
+    state = load(STATE_FILE, {"episodes": {}})
+    state.setdefault("episodes", {})
+    extra = ""
+    try:
+        if not args.dry_run and load(LEDGER_FILE, {"posts": []})["posts"]:
+            reconcile()
+        if only_url:
+            vid = re.search(r"(?:v=|youtu\.be/|shorts/)([\w-]{11})", only_url)
+            if not vid:
+                raise Stop("That doesn't look like a YouTube video URL.")
+            ep = {"id": vid.group(1), "title": vid.group(1), "url": only_url}
+            if not args.dry_run:
+                configured_accounts(load(CONFIG_FILE, {}))
+            extra = process_episode(ep, state, args.dry_run, not args.no_claude_qc)
+            return
+        eps = latest_episodes()
+        if not eps:
+            raise Stop("Found no episodes on the channel page. yt-dlp may need an update: brew upgrade yt-dlp deno")
+        if "baseline_video_id" not in state:
+            # first run ever: don't dig up old episodes; start with the next one Anya uploads
+            state["baseline_video_id"] = state["last_processed_video_id"] = eps[0]["id"]
+            if not args.dry_run:
+                save(STATE_FILE, state)
+            log(f"First run{' dry-run' if args.dry_run else ''}: baseline {'would be ' if args.dry_run else ''}set to newest episode '{eps[0]['title']}'. Waiting for the next one.")
+            extra = f"Watching for episodes newer than: {eps[0]['title']}"
+            return
+        newest = eps[0]
+        if newest["id"] == state.get("last_processed_video_id"):
+            log("No new episode.")
+            return
+        rec = state["episodes"].get(newest["id"], {})
+        if rec.get("status") in ("done", "gave_up", "rejected"):
+            log(f"Newest episode already handled ({rec['status']}).")
+            return
+        if rec.get("attempts", 0) >= MAX_ATTEMPTS:
+            rec["status"] = "gave_up"
+            save(STATE_FILE, state)
+            notify("PURSUIT autopilot needs you", f"Gave up on '{newest['title']}' after {MAX_ATTEMPTS} tries. See {STATUS_FILE}")
+            return
+        if not args.dry_run:
+            configured_accounts(load(CONFIG_FILE, {}))
+        extra = process_episode(newest, state, args.dry_run, not args.no_claude_qc)
+    except Stop as e:
+        extra = f"STOPPED (nothing questionable was posted): {e}"
+        notify("PURSUIT autopilot stopped", str(e).splitlines()[0])
+        log(extra)
+    except Ambiguous as e:
+        extra = f"STOPPED: unclear response from Post for Me: {e}"
+        notify("PURSUIT autopilot stopped", "Unclear response from Post for Me. Will re-check next run.")
+        log(extra)
+    except Exception as e:   # any bug: fail closed and say so
+        import traceback
+        log(traceback.format_exc())
+        extra = f"STOPPED on an unexpected error: {e!r}"
+        notify("PURSUIT autopilot error", repr(e)[:200])
+    finally:
+        write_status(extra)
+        lock.close()
+
+
+# ------------------------------------------------------------------------------ setup / misc
+
+def setup_account_map():
+    """Choose only an unambiguous account per platform, preferring our OAuth external_id."""
+    live = connected_accounts()
+    selected = {}
+    for platform in PLATFORMS:
+        candidates = [a for a in live if a.get("platform") == platform]
+        owned = [a for a in candidates if a.get("external_id") == f"pursuit-{platform}"]
+        if len(owned) == 1:
+            selected[platform] = owned[0]
+        elif len(owned) > 1 or len(candidates) > 1:
+            labels = ", ".join(f"@{a.get('username') or '?'} ({a.get('id')})" for a in candidates)
+            raise Stop(f"Multiple connected {platform} accounts found: {labels}. Disconnect extras in Post for Me; not guessing.")
+        elif len(candidates) == 1:
+            selected[platform] = candidates[0]
+    return selected
+
+
+def cmd_setup(args):
+    print("\n== PURSUIT autopilot setup ==\n")
+    have = subprocess.run(["security", "find-generic-password", "-s", KEYCHAIN_SERVICE], capture_output=True).returncode == 0
+    if not have or args.new_key:
+        import getpass
+        print("Paste your Post for Me API key (from https://app.postforme.dev > API keys). It won't be shown.")
+        key = getpass.getpass("API key: ").strip()
+        if not key:
+            sys.exit("No key entered.")
+        subprocess.run(["security", "add-generic-password", "-U", "-a", os.environ.get("USER", "pursuit"),
+                        "-s", KEYCHAIN_SERVICE, "-w", key], check=True)
+        print("Saved in your macOS Keychain.\n")
+    cfg = load(CONFIG_FILE, {"accounts": {}})
+    accounts = setup_account_map()
+    for plat in PLATFORMS:
+        if plat in accounts and not args.reconnect:
+            print(f"  {plat}: connected as @{accounts[plat].get('username')}")
+            continue
+        body = {"platform": plat, "external_id": f"pursuit-{plat}"}
+        if plat == "instagram":
+            body["platform_data"] = {"instagram": {"connection_type": "instagram"}}
+        url = api("POST", "/v1/social-accounts/auth-url", body)["url"]
+        print(f"\n  Connect {plat.upper()}: a browser window is opening. Log in as PURSUIT's {plat} account and approve.")
+        subprocess.run(["open", url])
+        input("  Press Enter here once you've finished in the browser... ")
+        accounts = setup_account_map()
+        if plat not in accounts:
+            print(f"  !! {plat} doesn't show as connected yet. Re-run ./autopilot setup to try again.")
+        else:
+            print(f"  {plat}: connected as @{accounts[plat].get('username')}")
+    cfg["accounts"] = {p: accounts[p]["id"] for p in PLATFORMS if p in accounts}
+    cfg["usernames"] = {p: accounts[p].get("username") for p in PLATFORMS if p in accounts}
+    save(CONFIG_FILE, cfg)
+    missing = [p for p in PLATFORMS if p not in cfg["accounts"]]
+    print("\nAll three accounts connected. ✓" if not missing else f"\nStill missing: {', '.join(missing)}")
+    print("Next: ./autopilot test-post   (checks everything with a draft that is never published)\n")
+
+
+def cmd_test_post(args):
+    """Upload a real clip and create a *draft* post (isDraft: never processed/published), then delete the draft."""
+    cfg = load(CONFIG_FILE, {})
+    accounts = cfg.get("accounts") or {}
+    if any(p not in accounts for p in PLATFORMS):
+        sys.exit("Connect accounts first: ./autopilot setup")
+    live = configured_accounts(cfg)
+    for p in PLATFORMS:
+        print(f"  {p}: connected (@{live[p].get('username') or cfg.get('usernames', {}).get(p)})")
+    clips = sorted(OUT_DIR.glob("*/[0-9][0-9]_*/*.mp4"))
+    if not clips:
+        sys.exit("No rendered clip found to test with.")
+    mp4 = clips[0]
+    print(f"  uploading {mp4.name} ...")
+    media_url = upload_media(mp4)
+    external_id = f"pursuit-test-{int(time.time())}"
+    post = api("POST", "/v1/social-posts", {"caption": "PURSUIT autopilot connection test (draft, never published)",
+                                            "social_accounts": [accounts[p] for p in PLATFORMS],
+                                            "media": [{"url": media_url}], "isDraft": True,
+                                            "external_id": external_id})
+    print(f"  draft created: {post.get('id')} status={post.get('status')}")
+    if (not post.get("id") or post.get("status") != "draft" or post.get("external_id") != external_id
+            or set(_post_account_ids(post)) != set(accounts.values())):
+        if post.get("id"):
+            try:
+                api("DELETE", f"/v1/social-posts/{post['id']}")
+            except (Stop, Ambiguous):
+                pass
+        raise Stop("Post for Me did not confirm a safe draft exactly as requested. Check its dashboard; nothing else was created.")
+    api("DELETE", f"/v1/social-posts/{post['id']}")
+    print("  draft deleted. Everything works. ✓")
+
+
+def cmd_live_test(args):
+    """Explicitly schedule one fully checked clip. Never called by launchd."""
+    if not sys.stdin.isatty():
+        raise Stop("The one-clip live test requires an interactive Terminal.")
+    match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", args.url)
+    if not match:
+        raise Stop("That doesn't look like a YouTube episode URL.")
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOCK_FILE, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Stop("Another autopilot run is in progress. Try again after it finishes.")
+        cfg = load(CONFIG_FILE, {})
+        live = configured_accounts(cfg)
+        meta = pc.fetch_info(args.url)
+        summary = render_episode(args.url)
+        passed, report, doubles, broken_frac = check_episode(summary, use_claude=True)
+        if doubles:
+            log("QC found source captions; re-rendering with the safe crop band.")
+            summary = render_episode(args.url, band=BURNED_IN_BAND, ep_dir=summary["ep_dir"])
+            passed, report, doubles, broken_frac = check_episode(summary, use_claude=True, check_all_visually=True)
+        if doubles or not passed or broken_frac > MAX_FAIL_FRACTION:
+            raise Stop("The one-clip batch did not pass QC; nothing was scheduled.\n" + "\n".join(report))
+        clip = max(passed, key=lambda c: float(c.get("score") or 0))
+        ledger = load(LEDGER_FILE, {"posts": []})
+        eid = ext_id(summary["meta"], clip)
+        if any(p.get("external_id") == eid for p in ledger["posts"]) or find_posts_by_external_id(eid):
+            raise Stop("This clip already exists in the local or Post for Me ledger; not scheduling it again.")
+        when = next_slots(ledger, 1)[0]
+        mp4 = Path(summary["ep_dir"]) / clip["file"]
+        ac = clip["analysis"]
+        print("\n== CONTROLLED ONE-CLIP LIVE TEST ==")
+        print(f"\nMP4: {mp4}")
+        print(f"Episode: {meta['title']}")
+        print(f"YouTube title: {ac['youtube_title']}")
+        print(f"Caption:\n{ac['caption']}\n")
+        print("Destinations:")
+        for platform in PLATFORMS:
+            print(f"  {platform}: @{live[platform].get('username') or '?'} ({live[platform]['id']})")
+        print(f"Scheduled time: {when:%A %B %d, %Y at %I:%M %p %Z}")
+        print("\nThe video is opening for final review. This command can schedule only this one clip.")
+        subprocess.run(["open", str(mp4)], check=False)
+        confirmation = input('\nType POST ONE CLIP exactly to continue: ').strip()
+        if confirmation != "POST ONE CLIP":
+            cleanup_source(summary)
+            print("Cancelled. Nothing was scheduled.")
+            return
+        scheduled = schedule_clips([clip], summary, dry_run=False)
+        cleanup_source(summary)
+        if scheduled != [eid]:
+            raise Stop("Post for Me did not confirm exactly one scheduled clip; inspect the ledger before retrying.")
+        state = load(STATE_FILE, {"episodes": {}})
+        state.setdefault("episodes", {})[meta["id"]] = {
+            "title": meta["title"], "status": "live_test", "scheduled": scheduled,
+            "clips_rendered": len(summary["clips"]), "clips_passed": len(passed), "finished": now().isoformat(),
+        }
+        state["last_processed_video_id"] = meta["id"]
+        save(STATE_FILE, state)
+        write_status(f"Controlled live test scheduled: {clip['folder']}")
+        notify("PURSUIT live test scheduled", f"One clip scheduled for {when:%a %b %d at %I:%M %p}.")
+
+
+def cmd_status(args):
+    write_status()
+    print(STATUS_FILE.read_text())
+
+
+def main():
+    ap = argparse.ArgumentParser(description="PURSUIT autopilot")
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    r = sub.add_parser("run")
+    r.add_argument("--dry-run", action="store_true", help="do everything except create posts")
+    r.add_argument("--no-claude-qc", action="store_true", help=argparse.SUPPRESS)
+    p = sub.add_parser("process")
+    p.add_argument("url")
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--no-claude-qc", action="store_true", help=argparse.SUPPRESS)
+    s = sub.add_parser("setup")
+    s.add_argument("--new-key", action="store_true")
+    s.add_argument("--reconnect", action="store_true")
+    sub.add_parser("status")
+    sub.add_parser("pause")
+    sub.add_parser("resume")
+    sub.add_parser("test-post")
+    live = sub.add_parser("live-test", help="interactively schedule exactly one checked clip")
+    live.add_argument("url")
+    args = ap.parse_args()
+    try:
+        if args.cmd == "run":
+            cmd_run(args)
+        elif args.cmd == "process":
+            cmd_run(args, only_url=args.url)
+        elif args.cmd == "setup":
+            cmd_setup(args)
+        elif args.cmd == "test-post":
+            cmd_test_post(args)
+        elif args.cmd == "live-test":
+            cmd_live_test(args)
+        elif args.cmd == "status":
+            cmd_status(args)
+        elif args.cmd == "pause":
+            STATE_DIR.mkdir(parents=True, exist_ok=True)
+            PAUSE_FILE.touch()
+            write_status()
+            print("Paused: no new episodes will be processed. Posts already scheduled on Post for Me will still go out\n"
+                  "(cancel those in the Post for Me dashboard if you need to).")
+        elif args.cmd == "resume":
+            PAUSE_FILE.unlink(missing_ok=True)
+            write_status()
+            print("Resumed.")
+    except (Stop, Ambiguous) as e:
+        sys.exit(f"ERROR: {e}")
+
+
+if __name__ == "__main__":
+    main()

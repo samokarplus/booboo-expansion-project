@@ -1,0 +1,5 @@
+#!/bin/bash
+# Launcher for autopilot.py (also what launchd runs).
+DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
+export PATH="/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+exec "$DIR/.venv/bin/python" "$DIR/autopilot.py" "$@"
