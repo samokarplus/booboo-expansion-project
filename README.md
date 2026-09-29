@@ -2,7 +2,44 @@
 
 An automated podcast growth system built for **PURSUIT**.
 
-The goal is simple: run a hands-off podcast-to-short-form engine. A Mac works through PURSUIT's existing YouTube catalog, detects new episodes, finds strong standalone moments with Claude, renders and quality-checks vertical clips, and automatically publishes approved content on a recurring schedule.
+## What I Built
+
+This is a **local autonomous podcast-to-short-form content engine**. The human creates the long-form podcast; the system handles essentially the entire repetitive distribution workflow from episode discovery to publishing.
+
+In plain English: **publish a podcast episode, and the Mac can turn it into short-form social content without someone manually finding moments, editing clips, captioning them, maintaining a queue, choosing posting times, or pressing Post.**
+
+The system automatically:
+
+- Detects new PURSUIT YouTube episodes and works through the existing back catalog.
+- Downloads and transcribes episodes locally with Whisper.
+- Uses Claude to find coherent, standalone moments such as advice, stories, arguments, or complete thoughts rather than arbitrary timestamp windows.
+- Renders polished 9:16 vertical clips with speaker framing, burned captions, and normalized audio.
+- Runs automated technical and editorial quality control and rejects weak, incomplete, or awkward clips.
+- Tracks source episodes and time ranges to avoid recycling the same moments.
+- Maintains its own approved-content buffer and replenishes it from the back catalog.
+- Gives newly published podcast episodes priority over older material.
+- Schedules and publishes approved clips through Post for Me.
+- Targets up to **five posts per day** at **9 AM, 12 PM, 3 PM, 6 PM, and 9 PM local time**. Five is a ceiling, not a quota: if nothing good passes QC, the slot is skipped.
+- Checks for new episodes six times per day and keeps roughly a **21-clip approved buffer**.
+- Recovers safely from interrupted processing, Mac sleep/restarts, network failures, and ambiguous publishing responses.
+
+The unattended system also includes production safeguards: automated tests, resumable processing, serialized jobs/locking, atomic state writes, credential validation, pinned social-account identity, duplicate-post protection, API reconciliation, bounded media cleanup, corruption handling, and fail-closed behavior when an upstream service or credential stops working.
+
+The result is not just a clip maker. It is an **autonomous local social-media pipeline:**
+
+```text
+Long-form PURSUIT podcast
+        -> episode discovery
+        -> local transcription
+        -> AI moment selection
+        -> 9:16 editing + captions + audio/framing
+        -> automated quality control
+        -> approved content buffer
+        -> scheduled publishing
+        -> repeat
+```
+
+Unattended publishing is deliberately protected by a one-time controlled live-post gate before auto-posting can be enabled.
 
 ```text
 YouTube podcast episode
