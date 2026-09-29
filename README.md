@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-A fully automated, local **podcast-to-TikTok content engine** for PURSUIT. It watches the podcast's YouTube channel, transcribes old and new episodes, uses Claude to find coherent standalone moments, turns them into polished vertical clips with captions/framing/audio normalization, quality-checks them, queues the good ones, and publishes them automatically through Post for Me. New episodes get priority, duplicate moments are avoided, failures recover safely, and the system targets up to **5 posts per day** without routine human editing, clip selection, queue management, or posting.
+A fully automated, local **podcast-to-TikTok content engine** for PURSUIT. It watches the podcast's YouTube channel, transcribes old and new episodes, uses Claude to find coherent standalone moments, turns them into polished vertical clips with captions/framing/audio normalization, quality-checks them, queues the good ones, and publishes them automatically through Post for Me. New episodes get priority, duplicate moments are avoided, failures recover safely, and the system targets up to **5 posts per day** without routine human editing, clip selection, queue management, or posting. Every automated TikTok/Instagram caption includes a fixed CTA to **@AnyaPostnikov on YouTube** before the hashtags, creating a funnel from short-form clips to full PURSUIT episodes. Until the TikTok account reaches **1,000 followers** and can add a clickable website link, the profile bio directs viewers to `@AnyaPostnikov`; once eligible, the YouTube channel URL can be added as the clickable website.
 
 An automated podcast growth system built for **PURSUIT**.
 
