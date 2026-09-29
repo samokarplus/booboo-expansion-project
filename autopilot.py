@@ -37,7 +37,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import pursuit_clips as pc  # noqa: E402  (reuse probe/ffmpeg helpers and the Claude CLI wrapper)
 
-CHANNEL_URL = "https://www.youtube.com/@PursuitThePod/videos"   # /videos = long-form only, no Shorts
+CHANNEL_URL = pc.YOUTUBE_CHANNEL_URL + "/videos"   # canonical PURSUIT channel; /videos excludes Shorts
 OUT_DIR = Path(os.environ.get("PURSUIT_OUT", pc.DEFAULT_OUT))    # env overrides are for testing
 STATE_DIR = Path(os.environ.get("PURSUIT_STATE_DIR", Path.home() / "Library" / "Application Support" / "PURSUIT_AUTOPILOT"))
 STATE_FILE = STATE_DIR / "state.json"      # episodes seen / processed
@@ -624,8 +624,9 @@ def build_post(clip, meta, accounts, media_url, when, external_id, platforms=Non
     ac = clip["analysis"]
     caption = (ac.get("caption") or "").strip()
     tags = hashtags(ac)
-    social_caption = caption + (f"\n\n{tags}" if tags else "")
+    social_caption = pc.add_youtube_cta(caption) + (f"\n\n{tags}" if tags else "")
     yt_desc = (f"{caption}\n\nFull episode: {meta['title']}\n{meta['url']}\n\n"
+               f"More from PURSUIT: {pc.YOUTUBE_CHANNEL_URL}\n\n"
                f"PURSUIT with Anya Postnikov\n{tags} #shorts").strip()
     configs = {
         "youtube": {"title": ac["youtube_title"][:95], "description": yt_desc[:4900], "privacy_status": "public",

@@ -7,6 +7,14 @@ import pursuit_clips as pc
 
 
 class PursuitClipsTests(unittest.TestCase):
+    def test_every_social_caption_gets_one_canonical_youtube_cta(self):
+        plain = pc.add_youtube_cta("A useful thought.")
+        self.assertTrue(plain.endswith(pc.YOUTUBE_CTA))
+        self.assertEqual(plain.count(pc.YOUTUBE_CHANNEL_URL), 1)
+        old = pc.add_youtube_cta("A useful thought.\n\nFull episode of PURSUIT on YouTube.")
+        self.assertEqual(old, plain)
+        self.assertEqual(pc.add_youtube_cta(plain), plain)
+
     def test_extract_json_ignores_prose_and_braces(self):
         reply = 'note {not json}\n```json\n{"clips":[{"start":1,"end":12,"start_words":"hello",' \
                 '"end_words":"done","overall":80}]}\n```'

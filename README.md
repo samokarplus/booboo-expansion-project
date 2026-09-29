@@ -4,6 +4,8 @@ An automated podcast growth system built for **PURSUIT**.
 
 The goal is simple: turn long-form podcast episodes into polished short-form discovery content with as little weekly work as possible.
 
+The canonical destination for every social post is [PURSUIT with Anya Postnikov on YouTube](https://www.youtube.com/@AnyaPostnikov). The publishing code appends that channel URL to every TikTok/Instagram caption and includes it in YouTube descriptions.
+
 ```text
 YouTube podcast episode
         -> detect and download
@@ -90,8 +92,9 @@ Create the real social accounts before starting this section. Do not use persona
 1. Create or finish the PURSUIT TikTok account.
 2. Create or finish the PURSUIT Instagram account and make it a Professional Creator or Business account.
 3. Confirm you can log in to the intended PURSUIT YouTube, Instagram, and TikTok accounts in the browser.
-4. Create a Post for Me project and copy its API key.
-5. Run setup:
+4. Set the TikTok and Instagram bio/website link to `https://www.youtube.com/@AnyaPostnikov`. Post for Me publishes posts but does not edit profile bios, so this is a one-time manual account setting.
+5. Create a Post for Me project and copy its API key.
+6. Run setup:
 
 ```bash
 cd ~/Documents/PURSUIT_CLIPS_TOOL
@@ -173,6 +176,7 @@ Runtime data is stored outside the repository:
 - **Real dry runs:** dry-run processing does not alter production state or call posting endpoints.
 - **Explicit live test:** the one-clip live test requires an exact interactive confirmation.
 - **No channel administration:** the tool does not use YouTube write/delete APIs and cannot edit or delete existing channel videos.
+- **One canonical funnel:** generated TikTok/Instagram copy always directs viewers to `https://www.youtube.com/@AnyaPostnikov`.
 
 Posts already scheduled on Post for Me are controlled by Post for Me. Pausing or uninstalling this local tool does not cancel them; use the Post for Me dashboard when cancellation is required.
 

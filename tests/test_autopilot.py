@@ -151,6 +151,8 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(p["platform_configurations"]["instagram"]["placement"], "reels")
         self.assertEqual(p["platform_configurations"]["youtube"]["title"], "Title 0")
         self.assertIn("watch?v=VIDEOID1234", p["platform_configurations"]["youtube"]["description"])
+        self.assertIn(pc.YOUTUBE_CHANNEL_URL, p["platform_configurations"]["youtube"]["description"])
+        self.assertIn(pc.YOUTUBE_CHANNEL_URL, p["caption"])
         self.assertIn("#running #ultra", p["caption"])
         # second run: everything is in the ledger, nothing new gets created
         self.assertEqual(ap.schedule_clips(self.clips, self.summary, dry_run=False), [])

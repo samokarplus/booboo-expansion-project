@@ -30,6 +30,8 @@ FONTS_DIR = HERE / "fonts"
 PROMPT_FILE = HERE / "clip_prompt.md"
 DEFAULT_OUT = Path.home() / "Desktop" / "PURSUIT_CLIPS"
 WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@AnyaPostnikov"
+YOUTUBE_CTA = f"Watch PURSUIT on YouTube: {YOUTUBE_CHANNEL_URL}"
 
 MAX_CLIPS = 10          # never render more than this
 MIN_CLIPS = 5           # render at least this many if Claude found them...
@@ -53,6 +55,15 @@ FFMPEG_CANDIDATES = ["/opt/homebrew/opt/ffmpeg-full/bin/ffmpeg", "/usr/local/opt
 
 class Fail(Exception):
     """An error with a message meant for a human."""
+
+
+def add_youtube_cta(caption):
+    """Give every social caption one consistent route back to PURSUIT on YouTube."""
+    caption = (caption or "").strip()
+    caption = re.sub(r"\s*Full episode of PURSUIT on YouTube\.?\s*$", "", caption, flags=re.IGNORECASE).strip()
+    if YOUTUBE_CHANNEL_URL in caption:
+        return caption
+    return f"{caption}\n\n{YOUTUBE_CTA}" if caption else YOUTUBE_CTA
 
 
 def log(msg):
@@ -602,7 +613,7 @@ def write_copy(folder, clip, meta, start, end, transcript_text):
     lines = [
         "CLIP TITLE:", clip.get("clip_title", ""), "",
         "YOUTUBE SHORT TITLE:", clip.get("youtube_title", ""), "",
-        "INSTAGRAM/TIKTOK CAPTION:", clip.get("caption", ""), "",
+        "INSTAGRAM/TIKTOK CAPTION:", add_youtube_cta(clip.get("caption", "")), "",
         "OPTIONAL HASHTAGS:", tags, "",
         "ON-SCREEN HOOK:", clip.get("onscreen_hook") or "(none, the spoken opening is the hook)", "",
         "SOURCE:", meta["title"],

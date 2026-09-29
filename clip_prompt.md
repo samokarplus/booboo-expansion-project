@@ -27,7 +27,7 @@ For each clip decide whether a short text hook shown during the first seconds wo
 ## Copy
 - `clip_title`: short, human-readable name for the clip (used for the folder name), 3–7 words.
 - `youtube_title`: YouTube Shorts title, under 70 characters, curiosity-driven but honest. No hashtags in it.
-- `caption`: Instagram/TikTok caption, 1–3 short sentences in a natural voice (not salesy). Only when it fits naturally, end with a soft pointer to the full episode, e.g. "Full episode of PURSUIT on YouTube." Do NOT put a CTA on every clip; roughly half is plenty, and only where the clip naturally leaves people wanting more.
+- `caption`: Instagram/TikTok caption, 1–3 short sentences in a natural voice (not salesy). Do not add a call to action or URL; the publishing code appends the canonical PURSUIT YouTube destination to every post consistently.
 - `hashtags`: 3–6 relevant hashtags (no # needed), specific rather than generic.
 - `why`: one short sentence on why this clip works.
 
