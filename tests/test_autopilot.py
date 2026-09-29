@@ -261,13 +261,21 @@ class AutopilotTests(unittest.TestCase):
         other = dict(self.summary, meta=dict(self.summary["meta"], id="OTHERVIDEO1", title="Other"))
         ap.add_to_queue([dict(self.clips[2], score=70, analysis=dict(self.clips[2]["analysis"], category="love"))],
                         other, fresh=False)
+        third = dict(self.summary, meta=dict(self.summary["meta"], id="THIRDVIDEO1", title="Third"))
+        third_clips = []
+        for base, folder, score in ((self.clips[0], "01_third-a", 76), (self.clips[1], "02_third-b", 71)):
+            target = self.ep_dir / folder / f"{folder}.mp4"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(b"x" * 1000)
+            third_clips.append(dict(base, folder=folder, file=f"{folder}/{folder}.mp4", score=score))
+        ap.add_to_queue(third_clips, third, fresh=False)
 
     def test_queue_never_holds_duplicates(self):
         self.queue_two_episodes()
         self.queue_two_episodes()
         ids = [q["external_id"] for q in ap.load(ap.QUEUE_FILE, {})["clips"]]
         self.assertEqual(len(ids), len(set(ids)))
-        self.assertEqual(len(ids), 4)
+        self.assertEqual(len(ids), 6)
 
     def test_queue_is_not_posted_until_auto_posting_is_enabled(self):
         self.tiktok_only()
@@ -290,11 +298,21 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(ap.fill_schedule(), 0)   # already enough ahead: nothing more, nothing twice
         posts = sorted(ap.load(ap.LEDGER_FILE, {})["posts"], key=lambda p: p["scheduled_at"])
         self.assertEqual(len({p["external_id"] for p in posts}), len(posts))
-        # the other episode's clip is mixed in instead of three from the same episode in a row
-        self.assertIn("OTHERVIDEO1", [p["episode"] for p in posts[:2]])
+        # another episode is mixed in instead of clips from the same episode back to back
+        self.assertEqual(len({p["episode"] for p in posts[:2]}), 2)
         times = [dt.datetime.fromisoformat(p["scheduled_at"]) for p in posts]
         self.assertTrue(all(t.hour in ap.POST_HOURS for t in times))
         self.assertTrue(all((b - a) >= dt.timedelta(hours=2) for a, b in zip(times, times[1:])))
+
+    def test_queue_slots_are_exactly_the_five_daily_local_times(self):
+        original_now = ap.now
+        try:
+            ap.now = lambda: dt.datetime(2026, 9, 28, 8, 0, tzinfo=ap.TZ)
+            slots = ap.queue_slots({"posts": []}, 5)
+            self.assertEqual([(x.hour, x.minute) for x in slots], [(9, 0), (12, 0), (15, 0), (18, 0), (21, 0)])
+            self.assertTrue(all(x.tzinfo == ap.TZ for x in slots))
+        finally:
+            ap.now = original_now
 
     def test_deleting_a_clip_file_vetoes_it(self):
         self.tiktok_only()
@@ -461,7 +479,7 @@ class AutopilotTests(unittest.TestCase):
             ap.cmd_auto_post(args)
         self.assertEqual(FakePostForMe.posts, {})
         # the live test went out and TikTok reported success
-        ap.schedule_from_queue(ap.load(ap.QUEUE_FILE, {})["clips"][0], ap.now() + dt.timedelta(minutes=20))
+        ap.schedule_from_queue(ap.load(ap.QUEUE_FILE, {})["clips"][0], ap.now() + dt.timedelta(minutes=20), live_test=True)
         ledger = ap.load(ap.LEDGER_FILE, {})
         ledger["posts"][0]["scheduled_at"] = (ap.now() - dt.timedelta(hours=1)).isoformat()
         ap.save(ap.LEDGER_FILE, ledger)
@@ -472,6 +490,32 @@ class AutopilotTests(unittest.TestCase):
             ap.cmd_auto_post(args)
         self.assertTrue(ap.load(ap.CONFIG_FILE, {})["auto_posting"])
         self.assertEqual(len(FakePostForMe.posts), 1 + ap.SCHEDULE_AHEAD)
+
+    def test_an_ordinary_post_cannot_unlock_auto_posting(self):
+        self.tiktok_only()
+        self.queue_two_episodes()
+        ap.schedule_from_queue(ap.load(ap.QUEUE_FILE, {})["clips"][0],
+                               dt.datetime(2026, 9, 29, 9, 0, tzinfo=ap.TZ))
+        ledger = ap.load(ap.LEDGER_FILE, {})
+        ledger["posts"][0].update(status="posted", results={"tiktok": {"success": True}})
+        ap.save(ap.LEDGER_FILE, ledger)
+        with self.assertRaisesRegex(ap.Stop, "live test"):
+            ap.cmd_auto_post(type("A", (), {"state": "on"}))
+        self.assertFalse(ap.load(ap.CONFIG_FILE, {}).get("auto_posting"))
+
+    def test_existing_off_slot_live_test_can_unlock_only_after_success(self):
+        post = {"status": "posted", "scheduled_at": "2026-09-28T18:50:00-06:00", "platforms": ["tiktok"],
+                "results": {"tiktok": {"success": True}}}
+        self.assertTrue(ap._confirmed_live_test({"posts": [post]}))
+        self.assertFalse(ap._confirmed_live_test({"posts": [dict(post, status="scheduled")]}))
+
+    def test_confirmed_posts_delete_media_but_failed_posts_keep_it(self):
+        media = self.ep_dir / self.clips[0]["file"]
+        self.assertTrue(media.exists())
+        ap.cleanup_posted_media({"status": "partial", "file": str(media)})
+        self.assertTrue(media.exists())
+        ap.cleanup_posted_media({"status": "posted", "file": str(media)})
+        self.assertFalse(media.exists())
 
     def test_bad_key_stops(self):
         os.environ["PURSUIT_POSTFORME_KEY"] = "wrong"
@@ -537,6 +581,36 @@ class AutopilotTests(unittest.TestCase):
             ap.cmd_run(args)
             self.assertEqual(calls, ["NEWEPISODE1"])
 
+    def test_multiple_new_uploads_are_processed_newest_first(self):
+        args = type("A", (), {"dry_run": False, "no_claude_qc": False})
+        state = {"baseline_video_id": "BASEVIDEO01", "last_processed_video_id": "BASEVIDEO01", "episodes": {}}
+        episodes = [{"id": "NEWESTVID01", "title": "Newest", "url": "u", "duration": 999},
+                    {"id": "NEWERVIDEO1", "title": "Newer", "url": "u", "duration": 999},
+                    {"id": "BASEVIDEO01", "title": "Base", "url": "u", "duration": 999}]
+        calls = []
+        def process(ep, current, dry_run, use_claude=True, **kwargs):
+            calls.append(ep["id"])
+            current["episodes"][ep["id"]] = {"status": "queued"}
+            return "ok"
+        with patch("autopilot.latest_episodes", return_value=episodes), patch("autopilot.process_episode", side_effect=process):
+            ap.check_new_episode(args, state)
+            ap.check_new_episode(args, state)
+        self.assertEqual(calls, ["NEWESTVID01", "NEWERVIDEO1"])
+
+    def test_new_episode_given_up_is_retried_after_cooldown(self):
+        args = type("A", (), {"dry_run": False, "no_claude_qc": False})
+        state = {"baseline_video_id": "BASEVIDEO01", "last_processed_video_id": "BASEVIDEO01",
+                 "episodes": {"NEWESTVID01": {"status": "gave_up", "attempts": ap.MAX_ATTEMPTS,
+                                                "last_attempt": (ap.now() - dt.timedelta(days=8)).isoformat()}}}
+        episodes = [{"id": "NEWESTVID01", "title": "Newest", "url": "u", "duration": 999},
+                    {"id": "BASEVIDEO01", "title": "Base", "url": "u", "duration": 999}]
+        calls = []
+        with patch("autopilot.latest_episodes", return_value=episodes), patch(
+                "autopilot.process_episode", side_effect=lambda ep, *a, **kw: calls.append(ep["id"]) or "ok"):
+            ap.check_new_episode(args, state)
+        self.assertEqual(calls, ["NEWESTVID01"])
+        self.assertEqual(state["episodes"]["NEWESTVID01"]["attempts"], 0)
+
     def test_first_dry_run_does_not_create_baseline_state(self):
         args = type("A", (), {"dry_run": True, "no_claude_qc": False})
         episodes = [{"id": "OLDEPISODE1", "title": "Old", "url": "u", "duration": 999}]
@@ -593,6 +667,13 @@ class AutopilotTests(unittest.TestCase):
         ap.save(ap.STATE_FILE, {"unicode": "Anya’s", "value": 1})
         self.assertEqual(ap.load(ap.STATE_FILE, {}), {"unicode": "Anya’s", "value": 1})
         self.assertEqual(ap.STATE_FILE.stat().st_mode & 0o777, 0o600)
+
+    def test_corrupt_state_fails_closed_instead_of_being_overwritten(self):
+        ap.STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+        ap.STATE_FILE.write_text('{"broken":')
+        with self.assertRaisesRegex(ap.Stop, "damaged"):
+            ap.load(ap.STATE_FILE, {})
+        self.assertEqual(ap.STATE_FILE.read_text(), '{"broken":')
 
 
 class TechnicalCheckTests(unittest.TestCase):

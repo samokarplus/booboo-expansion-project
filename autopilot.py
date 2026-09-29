@@ -4,9 +4,8 @@
 Runs from launchd a few times a day. Each run:
   1. reconciles already-scheduled posts (did they actually go out?)
   2. looks for a new full episode on the channel
-  3. if there is one: renders clips with pursuit_clips.py, checks every clip, and
-     schedules the good ones on Post for Me (YouTube Shorts + Instagram Reels + TikTok),
-     one clip per day.
+  3. renders/QCs new work and one back-catalog episode while the approved buffer is low
+  4. once explicitly enabled, keeps up to five verified TikTok posts scheduled ahead
 
 Fail closed: anything unexpected means nothing gets posted and you get a notification.
 
@@ -63,15 +62,15 @@ EXPECTED_USERNAMES = {"tiktok": "pursuitthepod"}
 PINNED_PLATFORMS = {"tiktok"}
 TIKTOK_API = os.environ.get("PURSUIT_TIKTOK_API", "https://open.tiktokapis.com")
 QUEUE_FILE = STATE_DIR / "queue.json"      # approved clips waiting to be posted
-POST_HOURS = [10, 14, 19]      # queue posting slots (local time) once auto-posting is enabled
-SCHEDULE_AHEAD = 3             # keep this many queued clips scheduled in advance (covers the Mac sleeping)
+POST_HOURS = [9, 12, 15, 18, 21]  # maximum five posts/day, local time; empty slots stay empty
+SCHEDULE_AHEAD = 5             # keep one full day scheduled ahead (Post for Me works while the Mac sleeps)
 BACKLOG_PER_RUN = 1            # old episodes processed per scheduled run
-BACKLOG_TARGET = 21            # stop working on the back catalog while a week of approved clips is waiting
+BACKLOG_TARGET = 21            # stop while roughly four days of approved clips are waiting at the ceiling
 RETRY_AFTER_DAYS = 7           # episodes that failed MAX_ATTEMPTS times get another chance after this
 
 # --- policy ---------------------------------------------------------------------------
 TZ = ZoneInfo(os.environ.get("PURSUIT_TZ", "America/Denver"))
-POST_HOUR = 17                 # one clip per day at 5pm local time
+POST_HOUR = 17                 # legacy direct-scheduling helper; queue autopost uses POST_HOURS
 MAX_CLIPS_RENDER = 8
 MAX_CLIPS_POST = 7             # a week's worth
 MIN_POST_SCORE = 70            # Claude's overall score needed to publish
@@ -109,6 +108,8 @@ def load(path, default):
         return json.loads(Path(path).read_text())
     except FileNotFoundError:
         return default
+    except json.JSONDecodeError as e:
+        raise Stop(f"{Path(path).name} is damaged ({e}); stopped rather than guessing or overwriting it.")
 
 
 def save(path, data):
@@ -141,15 +142,17 @@ _claude_ok = None
 
 
 def claude_available():
-    """One cheap check per run, so an outage doesn't use up an episode's retry attempts."""
+    """Check local Claude authentication without spending a model call."""
     global _claude_ok
     if _claude_ok is None:
         try:
-            if not pc.find_claude():
+            claude = pc.find_claude()
+            if not claude:
                 raise pc.Fail("Claude Code CLI not found")
-            pc.ask_claude(pc.find_claude(), "Reply with just the word OK.", timeout=90)
-            _claude_ok = True
-        except (pc.Fail, subprocess.TimeoutExpired, OSError) as e:
+            r = subprocess.run([claude, "auth", "status", "--json"], capture_output=True, text=True, timeout=30)
+            status = json.loads(r.stdout or "{}")
+            _claude_ok = r.returncode == 0 and status.get("loggedIn") is True
+        except (pc.Fail, subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as e:
             log(f"Claude unavailable this run: {str(e)[:150]}")
             _claude_ok = False
     return _claude_ok
@@ -422,6 +425,23 @@ def cleanup_source(summary):
     work = Path(summary["ep_dir"]) / ".work"
     for source in work.glob("source.*"):
         source.unlink(missing_ok=True)
+
+
+def cleanup_unqueued_media(summary):
+    """Keep approved media only; rejected rendered clips otherwise accumulate forever."""
+    keep = {str(Path(q["ep_dir"]) / q["clip"]["file"])
+            for q in load(QUEUE_FILE, {"clips": []}).get("clips", [])
+            if q.get("status") in ("queued", "scheduled")}
+    for clip in summary.get("clips", []):
+        mp4 = Path(summary["ep_dir"]) / clip["file"]
+        if str(mp4) not in keep:
+            mp4.unlink(missing_ok=True)
+
+
+def cleanup_posted_media(post):
+    """Post for Me has the media after a confirmed publish; the local MP4 is no longer needed."""
+    if post.get("status") == "posted" and post.get("file"):
+        Path(post["file"]).unlink(missing_ok=True)
 
 
 # ------------------------------------------------------------------------------ 3. quality checks
@@ -739,6 +759,7 @@ def reconcile(dry_run=False):
         if yt.get("success") and yt.get("url") and not youtube_is_public(yt["url"]):
             problems.append(f"{p['clip']}: YouTube upload exists but isn't publicly viewable ({yt['url']}).")
         p["status"] = "posted" if all(v["success"] for v in p["results"].values()) else "partial"
+        cleanup_posted_media(p)
         published.append(p)
         changed = True
     if changed:
@@ -767,6 +788,7 @@ def render_and_check(ep, rec, use_claude=True):
     n = len(summary["clips"])
     if n == 0 or not passed or broken_frac > MAX_FAIL_FRACTION:
         cleanup_source(summary)
+        cleanup_unqueued_media(summary)
         rec.update(status="rejected", report=report, finished=now().isoformat())   # a verdict: don't retry
         why = "No clip passed the checks" if n == 0 or not passed else \
               "Most postable clips failed checks, so the whole batch is suspect"
@@ -791,6 +813,8 @@ def process_episode(ep, state, dry_run, use_claude=True, fresh=True):
         if not dry_run:
             save(STATE_FILE, state)
     added = [] if dry_run else add_to_queue(passed, summary, fresh)
+    if not dry_run:
+        cleanup_unqueued_media(summary)
     n = len(summary["clips"])
     rec.update(status="dry_run" if dry_run else "queued", title=summary["meta"]["title"], clips_rendered=n,
                clips_passed=len(passed), queued=added, report=report, finished=now().isoformat())
@@ -860,7 +884,7 @@ def queue_slots(ledger, n):
     return slots
 
 
-def schedule_from_queue(item, when):
+def schedule_from_queue(item, when, live_test=False):
     """Schedule one queued clip through the normal (duplicate-safe, fail-closed) scheduling path."""
     queue = load(QUEUE_FILE, {"clips": []})
     mp4 = Path(item["ep_dir"]) / item["clip"]["file"]
@@ -885,6 +909,13 @@ def schedule_from_queue(item, when):
     done = schedule_clips([dict(item["clip"], analysis=item["analysis"])], summary, dry_run=False, slots=[when])
     if done != [item["external_id"]]:
         raise Stop(f"Post for Me did not confirm {item['clip']['folder']}; inspect the ledger before retrying.")
+    if live_test:
+        ledger = load(LEDGER_FILE, {"posts": []})
+        match = [p for p in ledger["posts"] if p["external_id"] == item["external_id"]]
+        if len(match) != 1:
+            raise Stop("Couldn't mark the controlled live test unambiguously; auto-posting will remain off.")
+        match[0]["live_test"] = True
+        save(LEDGER_FILE, ledger)
     for q in queue["clips"]:
         if q["external_id"] == item["external_id"]:
             q["status"] = "scheduled"
@@ -925,6 +956,11 @@ def backlog_step(state, limit, use_claude=True):
         log(f"{waiting} approved clips waiting; back catalog can rest.")
         return [], None
     eps = latest_episodes(limit=300)
+    baseline = state.get("baseline_video_id")
+    if baseline:
+        baseline_pos = next((i for i, ep in enumerate(eps) if ep["id"] == baseline), None)
+        if baseline_pos is not None:
+            eps = eps[baseline_pos:]  # newer uploads belong to check_new_episode and retain priority
     todo = [e for e in eps if state["episodes"].get(e["id"], {}).get("status") not in
             ("queued", "done", "rejected", "live_test")
             and retry_due(state["episodes"].get(e["id"], {}))]
@@ -988,10 +1024,10 @@ def cmd_run(args, only_url=None):
         write_status()
         lock.close()
         return
-    state = load(STATE_FILE, {"episodes": {}})
-    state.setdefault("episodes", {})
     extra = ""
     try:
+        state = load(STATE_FILE, {"episodes": {}})
+        state.setdefault("episodes", {})
         if only_url:
             if not args.dry_run and load(LEDGER_FILE, {"posts": []})["posts"]:
                 reconcile()
@@ -1003,8 +1039,8 @@ def cmd_run(args, only_url=None):
             return
         live = not args.dry_run
         steps = [("posts", lambda: (reconcile(), None)[1] if live and load(LEDGER_FILE, {"posts": []})["posts"] else None),
-                 ("scheduling", lambda: schedule_msg(fill_schedule()) if live else None),
                  ("new episode", lambda: check_new_episode(args, state)),
+                 ("scheduling", lambda: schedule_msg(fill_schedule()) if live else None),
                  ("back catalog", lambda: backlog_msg(*backlog_step(state, BACKLOG_PER_RUN, not args.no_claude_qc))
                   if live and load(CONFIG_FILE, {}).get("backlog", True) else None),
                  ("scheduling", lambda: schedule_msg(fill_schedule()) if live else None)]
@@ -1036,7 +1072,10 @@ def cmd_run(args, only_url=None):
         extra = f"STOPPED on an unexpected error: {e!r}"
         notify("PURSUIT autopilot error", repr(e)[:200])
     finally:
-        write_status(extra)
+        try:
+            write_status(extra)
+        except Stop as e:
+            log(f"Could not update status safely: {e}")
         lock.close()
 
 
@@ -1052,7 +1091,7 @@ def backlog_msg(msgs, left):
 
 def check_new_episode(args, state):
     """Queue clips from a newly uploaded episode. Returns a status line (or None)."""
-    eps = latest_episodes()
+    eps = latest_episodes(limit=20)
     if not eps:
         raise Stop("Found no episodes on the channel page. yt-dlp may need an update: brew upgrade yt-dlp deno")
     if "baseline_video_id" not in state:
@@ -1062,10 +1101,20 @@ def check_new_episode(args, state):
             save(STATE_FILE, state)
         log(f"First run{' dry-run' if args.dry_run else ''}: baseline {'would be ' if args.dry_run else ''}set to newest episode '{eps[0]['title']}'.")
         return f"Watching for episodes newer than: {eps[0]['title']}"
-    newest = eps[0]
-    if newest["id"] == state.get("last_processed_video_id"):
+    baseline = state["baseline_video_id"]
+    newer = eps[:next((i for i, ep in enumerate(eps) if ep["id"] == baseline), len(eps))]
+    pending = []
+    for ep in newer:
+        rec = state["episodes"].get(ep["id"], {})
+        if rec.get("status") in ("done", "rejected", "queued", "live_test"):
+            continue
+        if rec.get("status") == "gave_up" and not retry_due(rec):
+            continue
+        pending.append(ep)
+    if not pending:
         log("No new episode.")
         return None
+    newest = pending[0]
     rec = state["episodes"].get(newest["id"], {})
     if rec.get("status") in ("done", "gave_up", "rejected", "queued", "live_test"):
         log(f"Newest episode already handled ({rec['status']}).")
@@ -1266,7 +1315,7 @@ def cmd_live_test(args):
         if confirmation != "POST ONE CLIP":
             print("Cancelled. Nothing was scheduled.")
             return
-        eid = schedule_from_queue(item, when)
+        eid = schedule_from_queue(item, when, live_test=True)
         if eid != item["external_id"]:
             raise Stop("Post for Me did not confirm exactly one scheduled clip; inspect the ledger before retrying.")
         write_status(f"Controlled live test scheduled: {item['clip']['folder']} at {when:%a %b %d %H:%M}")
@@ -1274,7 +1323,27 @@ def cmd_live_test(args):
         notify("PURSUIT live test scheduled", f"One clip scheduled for {when:%a %b %d at %I:%M %p}.")
 
 
-def cmd_auto_post(args):
+def _confirmed_live_test(ledger):
+    """Require the controlled post, not merely any historical post, to have succeeded on TikTok."""
+    posts = ledger.get("posts", [])
+    for post in posts:
+        result = (post.get("results") or {}).get("tiktok") or {}
+        if post.get("status") != "posted" or not result.get("success"):
+            continue
+        if post.get("live_test"):
+            return True
+        # Compatibility for the one controlled test scheduled before live_test markers existed:
+        # it is the sole ledger entry and was deliberately scheduled off the normal :00 slots.
+        try:
+            when = dt.datetime.fromisoformat(post["scheduled_at"])
+        except (KeyError, ValueError):
+            continue
+        if len(posts) == 1 and when.minute != 0 and post.get("platforms") == ["tiktok"]:
+            return True
+    return False
+
+
+def _cmd_auto_post_locked(args):
     cfg = load(CONFIG_FILE, {})
     if args.state == "off":
         cfg["auto_posting"] = False
@@ -1284,7 +1353,7 @@ def cmd_auto_post(args):
     if load(LEDGER_FILE, {"posts": []})["posts"]:
         reconcile()                      # pick up the live test's result if it just went out
     ledger = load(LEDGER_FILE, {"posts": []})
-    if not any(p["status"] == "posted" for p in ledger["posts"]):
+    if not _confirmed_live_test(ledger):
         raise Stop("No post has been confirmed live yet. Do the one-clip live test first and let it go out "
                    "(./autopilot status shows it as [posted]).")
     configured_accounts(cfg)
@@ -1300,6 +1369,17 @@ def cmd_auto_post(args):
     print(f"Scheduled {n} clip(s) now.")
     print(f"Auto-posting ON: approved clips go out at {', '.join(f'{h}:00' for h in POST_HOURS)} "
           f"(keeping {SCHEDULE_AHEAD} scheduled ahead).")
+
+
+def cmd_auto_post(args):
+    """Change posting state under the same lock used by launchd and manual processing."""
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOCK_FILE, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Stop("Background processing is running. Try again after it finishes.")
+        _cmd_auto_post_locked(args)
 
 
 def cmd_backlog(args):

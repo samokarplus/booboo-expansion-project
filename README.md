@@ -13,7 +13,7 @@ YouTube podcast episode
         -> captions and audio normalization
         -> technical and visual quality control
         -> approved buffer (never the same moment twice)
-        -> Post for Me, ~3 per day
+        -> Post for Me, up to 5 per day
         -> verified TikTok @pursuitthepod (Instagram Reels / YouTube Shorts once connected)
 ```
 
@@ -126,12 +126,12 @@ The optional `PURSUIT_POSTFORME_KEY` environment variable is supported for devel
 
 ## What Runs Automatically
 
-A LaunchAgent (`./install_autopilot.sh`, already installed) runs at 7:15, 10:15, 13:15, 16:15, 19:15 and 22:15. It starts again after restarts and catches up once after sleep. Each run does these steps independently, so one failing step never blocks the others:
+A LaunchAgent (`./install_autopilot.sh`, already installed) runs at 7:15, 10:15, 13:15, 16:15, 19:15 and 22:15 local time. It is loaded again at login, runs immediately when loaded, and launchd coalesces missed calendar runs into one run after wake. Each run does these steps independently, so one failing step never blocks the others:
 
 1. **Checks earlier posts.** It asks Post for Me what happened and records the links. Failures trigger a Mac notification.
-2. **Keeps 3 posts scheduled ahead** (auto-posting only) in the 10:00, 14:00 and 19:00 slots, so about 3 TikToks a day. The posts sit on Post for Me's servers, so they go out even if the Mac is asleep or offline.
-3. **New episodes:** detects a new PURSUIT upload and turns its good moments into approved clips. Fresh clips get priority.
-4. **Back catalog:** processes one old episode per run (newest first) whenever fewer than 21 approved clips (about a week) are waiting.
+2. **New episodes:** detects new PURSUIT uploads before filling the schedule and turns their good moments into approved clips. Fresh clips get priority.
+3. **Keeps 5 posts scheduled ahead** (auto-posting only) in the 9:00, 12:00, 15:00, 18:00 and 21:00 slots, up to 5 TikToks a day. Five is a ceiling, not a quota: an empty buffer leaves the slot empty. The posts sit on Post for Me's servers, so they go out even if the Mac is asleep or offline.
+4. **Back catalog:** processes one old episode per run (newest first) whenever fewer than 21 approved clips (about four days at the ceiling) are waiting.
 5. **Tops the schedule up again** with anything new.
 
 For every clip:
@@ -189,7 +189,7 @@ The system is deliberately conservative, but editorial quality is subjective. Wa
 - `yt-dlp` occasionally needs an update when YouTube changes its site.
 - Automated framing works best with a clearly visible primary speaker.
 - Post for Me and social platforms may change APIs, pricing, or publishing rules.
-- Generated clips remain on disk until you remove them; full source downloads are cleaned after completed jobs.
+- Full source downloads and rejected clips are cleaned after completed jobs. An approved MP4 is retained until Post for Me confirms it was published, then removed automatically.
 
 ## Tests
 
