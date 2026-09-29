@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-A fully automated, local **podcast-to-TikTok content engine** for PURSUIT. It watches the podcast's YouTube channel, transcribes old and new episodes, uses Claude to find coherent standalone moments, turns them into polished vertical clips with captions/framing/audio normalization, quality-checks them, queues the good ones, and publishes them automatically through Post for Me. New episodes get priority, duplicate moments are avoided, failures recover safely, and the system targets up to **5 posts per day** without routine human editing, clip selection, queue management, or posting. Every automated TikTok/Instagram caption includes a fixed CTA to **@AnyaPostnikov on YouTube** before the hashtags, creating a funnel from short-form clips to full PURSUIT episodes. Until the TikTok account reaches **1,000 followers** and can add a clickable website link, the profile bio directs viewers to `@AnyaPostnikov`; once eligible, the YouTube channel URL can be added as the clickable website.
+A fully automated, local **podcast-to-TikTok content engine** for PURSUIT. It watches the podcast's YouTube channel, transcribes old and new episodes, uses Claude to find coherent standalone moments, turns them into polished vertical clips with captions/framing/audio normalization, quality-checks them, queues the good ones, and publishes them automatically through Post for Me. New episodes get priority, duplicate moments are avoided, failures recover safely, and the system targets up to **5 posts per day** without routine human editing, clip selection, queue management, or posting. The system continuously replenishes approved content toward a **21-clip target buffer**; this is a target, not a claim that 21 clips are currently ready. Only clips that have actually passed QC count as available inventory. Once clips have been submitted/scheduled with Post for Me, those scheduled posts can publish from the cloud even if the Mac is powered off; the Mac must be on to create, QC, replenish, and submit additional future clips. Every automated TikTok/Instagram caption includes a fixed CTA to **@AnyaPostnikov on YouTube** before the hashtags, creating a funnel from short-form clips to full PURSUIT episodes. Until the TikTok account reaches **1,000 followers** and can add a clickable website link, the profile bio directs viewers to `@AnyaPostnikov`; once eligible, the YouTube channel URL can be added as the clickable website.
 
 An automated podcast growth system built for **PURSUIT**.
 
@@ -26,7 +26,7 @@ The system automatically:
 - Gives newly published podcast episodes priority over older material.
 - Schedules and publishes approved clips through Post for Me.
 - Targets up to **five posts per day** at **9 AM, 12 PM, 3 PM, 6 PM, and 9 PM local time**. Five is a ceiling, not a quota: if nothing good passes QC, the slot is skipped.
-- Checks for new episodes six times per day and keeps roughly a **21-clip approved buffer**.
+- Checks for new episodes six times per day and works toward a **21-clip approved-buffer target**.
 - Recovers safely from interrupted processing, Mac sleep/restarts, network failures, and ambiguous publishing responses.
 
 The unattended system also includes production safeguards: automated tests, resumable processing, serialized jobs/locking, atomic state writes, credential validation, pinned social-account identity, duplicate-post protection, API reconciliation, bounded media cleanup, corruption handling, and fail-closed behavior when an upstream service or credential stops working.
