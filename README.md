@@ -6,6 +6,8 @@ A fully automated, local **podcast-to-TikTok content engine** for PURSUIT. It wa
 
 An automated podcast growth system built for **PURSUIT**.
 
+**Live TikTok:** [@pursuitthepod](https://www.tiktok.com/@pursuitthepod)
+
 ## What I Built
 
 This is a **local autonomous podcast-to-short-form content engine**. The human creates the long-form podcast; the system handles essentially the entire repetitive distribution workflow from episode discovery to publishing.
