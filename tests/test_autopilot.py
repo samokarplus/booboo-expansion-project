@@ -21,6 +21,7 @@ import pursuit_clips as pc  # noqa: E402
 
 ACCOUNTS = {"youtube": "spc_yt", "instagram": "spc_ig", "tiktok": "spc_tt"}
 EXPECTED = {p: "pursuitthepod" for p in ACCOUNTS}   # tests simulate all three verified
+PINS = {"tiktok": "open_tiktok"}
 
 
 class FakePostForMe(BaseHTTPRequestHandler):
@@ -28,6 +29,8 @@ class FakePostForMe(BaseHTTPRequestHandler):
     slow_create = False      # simulate: server creates the post but the reply never arrives in time
     disconnected = set()
     usernames = {}
+    user_ids = {}
+    tiktok = {"handle": "pursuitthepod", "open_id": "open_tiktok", "scope_ok": True}
     fail_platform = None
 
     def log_message(self, *a):
@@ -54,12 +57,21 @@ class FakePostForMe(BaseHTTPRequestHandler):
         self._json(200, {"success": True})
 
     def do_GET(self):
+        if self.path.startswith("/v2/user/info/"):   # plays TikTok's own user-info endpoint
+            if self.headers.get("Authorization") != "Bearer tok_tiktok":
+                return self._json(401, {"error": {"code": "access_token_invalid"}})
+            t = FakePostForMe.tiktok
+            if not t["scope_ok"] and "username" in self.path:
+                return self._json(401, {"data": {}, "error": {"code": "scope_not_authorized"}})
+            return self._json(200, {"data": {"user": {"open_id": t["open_id"], "username": t["handle"],
+                                                      "display_name": "Anya YT"}}, "error": {"code": "ok"}})
         if self.headers.get("Authorization") != "Bearer test-key":
             return self._json(401, {"error": "bad key"})
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/v1/social-accounts":
             data = [{"id": i, "platform": p, "username": self.usernames.get(p, "pursuitthepod"), "status": "connected",
+                     "user_id": self.user_ids.get(p, f"open_{p}"), "access_token": f"tok_{p}",
                      "external_id": f"pursuit-{p}"}
                     for p, i in ACCOUNTS.items() if i not in self.disconnected]
             return self._json(200, {"data": data, "meta": {}})
@@ -96,6 +108,7 @@ class AutopilotTests(unittest.TestCase):
         cls.server = ThreadingHTTPServer(("127.0.0.1", 0), FakePostForMe)
         threading.Thread(target=cls.server.serve_forever, daemon=True).start()
         ap.API = f"http://127.0.0.1:{cls.server.server_address[1]}"
+        ap.TIKTOK_API = ap.API
         ap.API_TIMEOUT = 1
         ap.notify = lambda title, msg: ap.log(f"NOTIFY {title}: {msg}")
         ap.youtube_is_public = lambda url: True
@@ -108,8 +121,10 @@ class AutopilotTests(unittest.TestCase):
         FakePostForMe.slow_create = False
         FakePostForMe.disconnected = set()
         FakePostForMe.usernames = {}
+        FakePostForMe.user_ids = {}
+        FakePostForMe.tiktok = {"handle": "pursuitthepod", "open_id": "open_tiktok", "scope_ok": True}
         ap.QUEUE_FILE.unlink(missing_ok=True)
-        ap.save(ap.CONFIG_FILE, {"accounts": ACCOUNTS, "expected_usernames": EXPECTED})
+        ap.save(ap.CONFIG_FILE, {"accounts": ACCOUNTS, "expected_usernames": EXPECTED, "verified_ids": PINS})
         self.ep_dir = TMP / "out" / "ep"
         self.clips = []
         for i in range(3):
@@ -178,7 +193,7 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(FakePostForMe.posts, {})
 
     def test_wrong_platform_account_id_stops_before_upload(self):
-        ap.save(ap.CONFIG_FILE, {"accounts": dict(ACCOUNTS, youtube="spc_ig"), "expected_usernames": EXPECTED})
+        ap.save(ap.CONFIG_FILE, {"accounts": dict(ACCOUNTS, youtube="spc_ig"), "expected_usernames": EXPECTED, "verified_ids": PINS})
         with self.assertRaisesRegex(ap.Stop, "actually instagram"):
             ap.schedule_clips(self.clips, self.summary, dry_run=False)
         self.assertEqual(FakePostForMe.posts, {})
@@ -195,7 +210,7 @@ class AutopilotTests(unittest.TestCase):
 
     # ---- only verified accounts ------------------------------------------------------------
     def tiktok_only(self):
-        ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt"}})   # real default: EXPECTED_USERNAMES has tiktok only
+        ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt"}, "verified_ids": PINS})
 
     def test_tiktok_only_config_posts_only_to_tiktok(self):
         self.tiktok_only()
@@ -205,15 +220,15 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(list(post["platform_configurations"]), ["tiktok"])
         self.assertEqual(ap.load(ap.LEDGER_FILE, {})["posts"][0]["platforms"], ["tiktok"])
 
-    def test_wrong_tiktok_handle_stops_before_upload(self):
+    def test_different_tiktok_account_stops_before_upload(self):
         self.tiktok_only()
-        FakePostForMe.usernames = {"tiktok": "someone_else"}
-        with self.assertRaisesRegex(ap.Stop, "not @pursuitthepod"):
+        FakePostForMe.user_ids = {"tiktok": "open_someone_else"}   # same display name, different TikTok account
+        with self.assertRaisesRegex(ap.Stop, "not the one verified as @pursuitthepod"):
             ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
         self.assertEqual(FakePostForMe.posts, {})
 
     def test_platform_without_expected_handle_is_never_used(self):
-        ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt", "youtube": "spc_yt"}})
+        ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt", "youtube": "spc_yt"}, "verified_ids": PINS})
         with self.assertRaisesRegex(ap.Stop, "not guessing"):
             ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
         self.assertEqual(FakePostForMe.posts, {})
@@ -290,6 +305,50 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(ap.load(ap.QUEUE_FILE, {})["clips"][0]["status"], "removed")
         self.assertEqual(FakePostForMe.posts, {})
 
+    def run_setup(self):
+        ap.CONFIG_FILE.unlink(missing_ok=True)
+        with patch("autopilot.subprocess.run") as run, patch("builtins.print") as out:
+            run.return_value.returncode = 0   # keychain says the key exists
+            ap.cmd_setup(type("A", (), {"new_key": False, "reconnect": False, "connect": None}))
+        return ap.load(ap.CONFIG_FILE, {}), " ".join(str(c) for c in out.call_args_list)
+
+    def test_tiktok_display_name_differs_from_handle_is_verified_via_tiktok(self):
+        # the real case: Post for Me "username" is the display name, external_id is a free-text label
+        FakePostForMe.usernames = {"tiktok": "Anya YT"}
+        cfg, printed = self.run_setup()
+        self.assertEqual(cfg["accounts"], {"tiktok": "spc_tt"})
+        self.assertEqual(cfg["verified_ids"], {"tiktok": "open_tiktok"})
+        self.assertEqual(cfg["usernames"]["tiktok"], "pursuitthepod")
+        ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)   # and posting accepts it
+        self.assertEqual(list(FakePostForMe.posts.values())[0]["social_accounts"], ["spc_tt"])
+
+    def test_tiktok_display_name_alone_never_verifies(self):
+        # display name looks right, but TikTok says the handle is someone else's
+        FakePostForMe.usernames = {"tiktok": "pursuitthepod"}
+        FakePostForMe.tiktok = {"handle": "not_pursuit", "open_id": "open_tiktok", "scope_ok": True}
+        cfg, printed = self.run_setup()
+        self.assertEqual(cfg["accounts"], {})
+        self.assertIn("@not_pursuit", printed)
+
+    def test_tiktok_without_profile_scope_is_not_enabled(self):
+        FakePostForMe.usernames = {"tiktok": "Anya YT"}
+        FakePostForMe.tiktok = {"handle": "pursuitthepod", "open_id": "open_tiktok", "scope_ok": False}
+        cfg, printed = self.run_setup()
+        self.assertEqual(cfg["accounts"], {})
+        self.assertIn("--connect tiktok", printed)
+
+    def test_tiktok_open_id_mismatch_is_not_enabled(self):
+        FakePostForMe.tiktok = {"handle": "pursuitthepod", "open_id": "open_other", "scope_ok": True}
+        cfg, printed = self.run_setup()
+        self.assertEqual(cfg["accounts"], {})
+        self.assertIn("disagree", printed)
+
+    def test_unpinned_tiktok_config_never_posts(self):
+        ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt"}})   # e.g. an old config without verification
+        with self.assertRaisesRegex(ap.Stop, "hasn't been verified"):
+            ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        self.assertEqual(FakePostForMe.posts, {})
+
     def test_bad_key_stops(self):
         os.environ["PURSUIT_POSTFORME_KEY"] = "wrong"
         try:
@@ -337,7 +396,7 @@ class AutopilotTests(unittest.TestCase):
         self.assertTrue(any("tiktok" in p for p in problems))
 
     def test_first_run_sets_baseline_then_processes_only_new(self):
-        ap.save(ap.CONFIG_FILE, {"accounts": ACCOUNTS, "expected_usernames": EXPECTED, "backlog": False})
+        ap.save(ap.CONFIG_FILE, {"accounts": ACCOUNTS, "expected_usernames": EXPECTED, "verified_ids": PINS, "backlog": False})
         calls = []
         args = type("A", (), {"dry_run": False, "no_claude_qc": False})
         old = [{"id": "OLDEPISODE1", "title": "Old", "url": "u", "duration": 999}]
