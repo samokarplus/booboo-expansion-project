@@ -1,5 +1,9 @@
 # Booboo Expansion Project
 
+## TL;DR
+
+A fully automated, local **podcast-to-TikTok content engine** for PURSUIT. It watches the podcast's YouTube channel, transcribes old and new episodes, uses Claude to find coherent standalone moments, turns them into polished vertical clips with captions/framing/audio normalization, quality-checks them, queues the good ones, and publishes them automatically through Post for Me. New episodes get priority, duplicate moments are avoided, failures recover safely, and the system targets up to **5 posts per day** without routine human editing, clip selection, queue management, or posting.
+
 An automated podcast growth system built for **PURSUIT**.
 
 ## What I Built
