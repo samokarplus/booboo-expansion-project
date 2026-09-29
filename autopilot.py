@@ -56,11 +56,12 @@ PLATFORMS = ["youtube", "instagram", "tiktok"]   # supported; we only post to th
 # (config.json "expected_usernames" can add/override, e.g. once YouTube/Instagram are connected.)
 EXPECTED_USERNAMES = {"tiktok": "pursuitthepod"}
 # Post for Me's "username" for TikTok is the *display name* (e.g. "Anya YT") and its "external_id" is a free-text
-# label chosen by whoever connected the account. Neither proves identity. For TikTok we ask TikTok itself for the
-# handle (needs the read-only user.info.profile scope), then pin TikTok's open_id; posts require that exact open_id.
+# label chosen by whoever connected the account. Neither proves identity, and Post for Me's TikTok app can't request
+# user.info.profile (the scope that exposes the handle). So identity is set once, explicitly, in ./autopilot setup:
+# TikTok confirms which account the token belongs to (user.info.basic), you confirm it's @pursuitthepod by typing
+# the handle, and both Post for Me's account id and TikTok's open_id are pinned. Posts require both, exactly.
 PINNED_PLATFORMS = {"tiktok"}
 TIKTOK_API = os.environ.get("PURSUIT_TIKTOK_API", "https://open.tiktokapis.com")
-TIKTOK_SCOPES = ["user.info.basic", "user.info.profile", "video.list", "video.upload", "video.publish"]
 QUEUE_FILE = STATE_DIR / "queue.json"      # approved clips waiting to be posted
 POST_HOURS = [10, 14, 19]      # queue posting slots (local time) once auto-posting is enabled
 SCHEDULE_AHEAD = 3             # keep this many queued clips scheduled in advance (covers the Mac sleeping)
@@ -211,12 +212,12 @@ def active_platforms(config):
     return active
 
 
-def tiktok_identity(account):
-    """Ask TikTok (not Post for Me) who this account is. Returns (open_id, handle). Token is never logged."""
+def tiktok_user_info(account, fields):
+    """Ask TikTok (not Post for Me) about this account. Returns (error_code, user). Token is never logged."""
     token = account.get("access_token")
     if not token:
         raise Stop("Post for Me didn't provide TikTok credentials to verify the account; not guessing.")
-    req = urllib.request.Request(f"{TIKTOK_API}/v2/user/info/?fields=open_id,username,display_name",
+    req = urllib.request.Request(f"{TIKTOK_API}/v2/user/info/?fields={fields}",
                                  headers={"Authorization": f"Bearer {token}", "User-Agent": "pursuit-autopilot"})
     try:
         with urllib.request.urlopen(req, timeout=API_TIMEOUT) as r:
@@ -230,14 +231,40 @@ def tiktok_identity(account):
             e.close()
     except (urllib.error.URLError, TimeoutError, ConnectionError, json.JSONDecodeError) as e:
         raise Ambiguous(f"Couldn't reach TikTok to verify the account: {e}")
-    code = (data.get("error") or {}).get("code")
-    if code == "scope_not_authorized":
-        raise Stop("TikTok didn't grant the profile permission needed to read the handle. "
-                   "Reconnect TikTok: ./autopilot setup --connect tiktok")
-    user = (data.get("data") or {}).get("user") or {}
-    if code != "ok" or not user.get("open_id") or not user.get("username"):
-        raise Stop(f"TikTok didn't confirm the account's handle ({code or 'no answer'}); not guessing.")
-    return user["open_id"], _handle(user["username"])
+    return (data.get("error") or {}).get("code"), (data.get("data") or {}).get("user") or {}
+
+
+def tiktok_identity(account):
+    """TikTok's own view of the account: (open_id, display_name, handle or None).
+    The handle only comes back if the connection happens to include user.info.profile."""
+    code, user = tiktok_user_info(account, "open_id,display_name,username")
+    if code == "ok" and user.get("open_id") and user.get("username"):
+        return user["open_id"], user.get("display_name"), _handle(user["username"])
+    code, user = tiktok_user_info(account, "open_id,display_name")      # user.info.basic: always granted
+    if code != "ok" or not user.get("open_id"):
+        raise Stop(f"TikTok didn't confirm which account this is ({code or 'no answer'}); not guessing.")
+    return user["open_id"], user.get("display_name"), None
+
+
+def confirm_pin(platform, acct, open_id, display_name, want):
+    """Explicit human confirmation, used only when the platform won't tell us the handle."""
+    if not sys.stdin.isatty():
+        print(f"  {platform:9} NOT enabled: confirming the account needs an interactive Terminal.")
+        return False
+    print(f"\n  {platform.upper()} account connected in Post for Me:")
+    print(f"    display name (Post for Me):  {acct.get('username')}")
+    print(f"    display name (TikTok):       {display_name}")
+    print(f"    label (external_id):         {acct.get('external_id')}   <- typed in when connecting; not proof")
+    print(f"    Post for Me account id:      {acct.get('id')}")
+    print(f"    TikTok account id (open_id): {open_id}   <- confirmed by TikTok to own this connection")
+    print(f"    profile photo:               {acct.get('profile_photo_url')}")
+    print(f"  {platform} won't share the @handle with Post for Me's app, so you have to confirm it.")
+    print(f"  Only confirm if you connected this account while logged into TikTok as @{want}.")
+    typed = input(f"  Type the handle of this account (without @) to confirm, or press Enter to skip: ").strip()
+    if _handle(typed) != want:
+        print(f"  {platform:9} NOT enabled (not confirmed as @{want}).")
+        return False
+    return True
 
 
 def configured_accounts(config):
@@ -264,7 +291,7 @@ def configured_accounts(config):
         if platform in PINNED_PLATFORMS:
             pinned = (config.get("verified_ids") or {}).get(platform)
             if not pinned:
-                raise Stop(f"The {platform} account hasn't been verified with {platform} itself yet. Run ./autopilot setup")
+                raise Stop(f"The {platform} account hasn't been verified and pinned yet. Run ./autopilot setup")
             if account.get("user_id") != pinned:
                 raise Stop(f"The connected {platform} account is not the one verified as @{_handle(expected[platform])}; not posting.")
         elif _handle(account.get("username")) != _handle(expected[platform]):
@@ -1004,8 +1031,6 @@ def cmd_setup(args):
         if plat not in (args.connect or []) and not (args.reconnect and plat in accounts):
             continue
         body = {"platform": plat, "external_id": f"pursuit-{plat}"}
-        if plat == "tiktok":
-            body["platform_data"] = {"tiktok": {"permission_overrides": TIKTOK_SCOPES}}
         if plat == "instagram":
             body["platform_data"] = {"instagram": {"connection_type": "instagram"}}
         url = api("POST", "/v1/social-accounts/auth-url", body)["url"]
@@ -1018,7 +1043,10 @@ def cmd_setup(args):
         else:
             print(f"  {plat}: connected as @{accounts[plat].get('username')}")
     expected = dict(EXPECTED_USERNAMES, **(cfg.get("expected_usernames") or {}))
-    cfg["accounts"], cfg["usernames"], cfg["verified_ids"] = {}, {}, {}
+    old_accounts = dict(cfg.get("accounts") or {})
+    old_pins = dict(cfg.get("verified_ids") or {})
+    old_method = dict(cfg.get("verified_by") or {})
+    cfg["accounts"], cfg["usernames"], cfg["verified_ids"], cfg["verified_by"] = {}, {}, {}, {}
     print("Accounts in Post for Me:")
     for plat in PLATFORMS:
         acct = accounts.get(plat)
@@ -1032,17 +1060,30 @@ def cmd_setup(args):
         want = _handle(expected[plat])
         if plat in PINNED_PLATFORMS:
             try:
-                open_id, handle = tiktok_identity(acct)
+                open_id, display_name, handle = tiktok_identity(acct)
             except (Stop, Ambiguous) as e:
                 print(f"  {plat:9} {label}: NOT enabled: {e}")
                 continue
             if open_id != acct.get("user_id"):
                 print(f"  {plat:9} {label}: NOT enabled (TikTok and Post for Me disagree about which account this is)")
-            elif handle != want:
+                continue
+            if handle is not None and handle != want:
                 print(f"  {plat:9} {label}: NOT enabled (TikTok says the handle is @{handle}, expected @{want})")
+                continue
+            same_as_before = (old_accounts.get(plat) == acct["id"] and old_pins.get(plat) == open_id
+                              and old_method.get(plat) in ("platform", "you"))
+            if handle == want:
+                method = "platform"
+            elif same_as_before:
+                method = old_method[plat]          # you already confirmed exactly this account
+            elif confirm_pin(plat, acct, open_id, display_name, want):
+                method = "you"
             else:
-                cfg["accounts"][plat], cfg["usernames"][plat], cfg["verified_ids"][plat] = acct["id"], handle, open_id
-                print(f"  {plat:9} @{handle} (display name {label}): verified with TikTok ✓")
+                continue
+            cfg["accounts"][plat], cfg["usernames"][plat], cfg["verified_ids"][plat] = acct["id"], want, open_id
+            cfg["verified_by"][plat] = method
+            how = "confirmed by TikTok" if method == "platform" else "confirmed by you, pinned"
+            print(f"  {plat:9} @{want} (display name {label}): {how} ✓")
         elif _handle(acct.get("username")) != want:
             print(f"  {plat:9} {label}: NOT enabled (expected @{want})")
         else:

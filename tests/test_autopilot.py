@@ -305,11 +305,16 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(ap.load(ap.QUEUE_FILE, {})["clips"][0]["status"], "removed")
         self.assertEqual(FakePostForMe.posts, {})
 
-    def run_setup(self):
-        ap.CONFIG_FILE.unlink(missing_ok=True)
-        with patch("autopilot.subprocess.run") as run, patch("builtins.print") as out:
+    def run_setup(self, typed=None, keep_config=False):
+        """typed=None: no Terminal (launchd). typed="...": interactive, and that's what you type."""
+        if not keep_config:
+            ap.CONFIG_FILE.unlink(missing_ok=True)
+        with patch("autopilot.subprocess.run") as run, patch("builtins.print") as out, \
+                patch("autopilot.sys.stdin.isatty", return_value=typed is not None), \
+                patch("builtins.input", return_value=typed or "") as asked:
             run.return_value.returncode = 0   # keychain says the key exists
             ap.cmd_setup(type("A", (), {"new_key": False, "reconnect": False, "connect": None}))
+        self.prompted = asked.called
         return ap.load(ap.CONFIG_FILE, {}), " ".join(str(c) for c in out.call_args_list)
 
     def test_tiktok_display_name_differs_from_handle_is_verified_via_tiktok(self):
@@ -330,12 +335,59 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(cfg["accounts"], {})
         self.assertIn("@not_pursuit", printed)
 
-    def test_tiktok_without_profile_scope_is_not_enabled(self):
+    # ---- the real situation: Post for Me's TikTok app can't read the handle ----------------------
+    def no_handle_scope(self):
         FakePostForMe.usernames = {"tiktok": "Anya YT"}
         FakePostForMe.tiktok = {"handle": "pursuitthepod", "open_id": "open_tiktok", "scope_ok": False}
-        cfg, printed = self.run_setup()
+
+    def test_without_handle_scope_unattended_setup_never_enables(self):
+        self.no_handle_scope()
+        cfg, printed = self.run_setup(typed=None)
         self.assertEqual(cfg["accounts"], {})
-        self.assertIn("--connect tiktok", printed)
+        self.assertIn("interactive Terminal", printed)
+
+    def test_without_handle_scope_typed_confirmation_pins_both_ids(self):
+        self.no_handle_scope()
+        cfg, printed = self.run_setup(typed="@PursuitThePod")
+        self.assertEqual(cfg["accounts"], {"tiktok": "spc_tt"})
+        self.assertEqual(cfg["verified_ids"], {"tiktok": "open_tiktok"})
+        self.assertEqual(cfg["verified_by"], {"tiktok": "you"})
+        self.assertIn("Anya YT", printed)            # you were shown what you're confirming
+        ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        self.assertEqual(list(FakePostForMe.posts.values())[0]["social_accounts"], ["spc_tt"])
+
+    def test_display_name_or_blank_is_not_a_confirmation(self):
+        for typed in ("Anya YT", "", "pursuit", "www.tiktok.com/@pursuitthepod2"):
+            self.no_handle_scope()
+            cfg, _ = self.run_setup(typed=typed)
+            self.assertEqual(cfg["accounts"], {}, typed)
+
+    def test_rerunning_setup_keeps_the_confirmed_pin_without_asking_again(self):
+        self.no_handle_scope()
+        self.run_setup(typed="pursuitthepod")
+        cfg, _ = self.run_setup(typed=None, keep_config=True)
+        self.assertFalse(self.prompted)
+        self.assertEqual(cfg["verified_ids"], {"tiktok": "open_tiktok"})
+
+    def test_a_different_tiktok_account_is_never_switched_to_automatically(self):
+        self.no_handle_scope()
+        self.run_setup(typed="pursuitthepod")
+        # the connection now belongs to another TikTok user (same display name)
+        FakePostForMe.user_ids = {"tiktok": "open_intruder"}
+        FakePostForMe.tiktok = dict(FakePostForMe.tiktok, open_id="open_intruder")
+        with self.assertRaisesRegex(ap.Stop, "not the one verified"):
+            ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        cfg, _ = self.run_setup(typed=None, keep_config=True)   # unattended re-setup doesn't adopt it
+        self.assertEqual(cfg["accounts"], {})
+        self.assertEqual(FakePostForMe.posts, {})
+
+    def test_pinned_account_disappearing_fails_closed(self):
+        self.no_handle_scope()
+        self.run_setup(typed="pursuitthepod")
+        FakePostForMe.disconnected = {"spc_tt"}
+        with self.assertRaisesRegex(ap.Stop, "disconnected"):
+            ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        self.assertEqual(FakePostForMe.posts, {})
 
     def test_tiktok_open_id_mismatch_is_not_enabled(self):
         FakePostForMe.tiktok = {"handle": "pursuitthepod", "open_id": "open_other", "scope_ok": True}
@@ -345,7 +397,7 @@ class AutopilotTests(unittest.TestCase):
 
     def test_unpinned_tiktok_config_never_posts(self):
         ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt"}})   # e.g. an old config without verification
-        with self.assertRaisesRegex(ap.Stop, "hasn't been verified"):
+        with self.assertRaisesRegex(ap.Stop, "hasn't been verified and pinned"):
             ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
         self.assertEqual(FakePostForMe.posts, {})
 
