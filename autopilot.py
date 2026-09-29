@@ -51,7 +51,14 @@ LOCK_FILE = STATE_DIR / "run.lock"
 
 API = os.environ.get("PURSUIT_POSTFORME_API", "https://api.postforme.dev")
 KEYCHAIN_SERVICE = "pursuit-postforme-api-key"
-PLATFORMS = ["youtube", "instagram", "tiktok"]
+PLATFORMS = ["youtube", "instagram", "tiktok"]   # supported; we only post to the ones configured AND verified
+# A platform is only ever posted to if its connected account has exactly this handle. Never guess.
+# (config.json "expected_usernames" can add/override, e.g. once YouTube/Instagram are connected.)
+EXPECTED_USERNAMES = {"tiktok": "pursuitthepod"}
+QUEUE_FILE = STATE_DIR / "queue.json"      # approved clips waiting to be posted
+POST_HOURS = [10, 14, 19]      # queue posting slots (local time) once auto-posting is enabled
+SCHEDULE_AHEAD = 3             # keep this many queued clips scheduled in advance (covers the Mac sleeping)
+BACKLOG_PER_RUN = 1            # old episodes processed per scheduled run
 
 # --- policy ---------------------------------------------------------------------------
 TZ = ZoneInfo(os.environ.get("PURSUIT_TZ", "America/Denver"))
@@ -186,12 +193,23 @@ def find_posts_by_external_id(external_id):
     return api("GET", "/v1/social-posts", query={"external_id": external_id, "limit": 10}).get("data", [])
 
 
+def _handle(name):
+    return (name or "").strip().lstrip("@").lower()
+
+
+def active_platforms(config):
+    """Platforms we're set up to post to (config order). Posting code never uses a platform outside this list."""
+    active = [p for p in PLATFORMS if p in (config.get("accounts") or {})]
+    if not active:
+        raise Stop("No social accounts configured. Run ./autopilot setup")
+    return active
+
+
 def configured_accounts(config):
-    """Return configured live accounts, failing closed on wrong-platform or duplicate IDs."""
+    """Return configured live accounts, failing closed on wrong-platform, wrong-handle or duplicate IDs."""
     wanted = config.get("accounts") or {}
-    missing = [p for p in PLATFORMS if p not in wanted]
-    if missing:
-        raise Stop(f"Accounts not connected: {', '.join(missing)}. Run ./autopilot setup")
+    expected = dict(EXPECTED_USERNAMES, **(config.get("expected_usernames") or {}))
+    platforms = active_platforms(config)
     live = connected_accounts()
     by_id = {}
     for account in live:
@@ -200,12 +218,16 @@ def configured_accounts(config):
             raise Stop(f"Post for Me returned duplicate account id {account_id}; not posting.")
         by_id[account_id] = account
     verified = {}
-    for platform in PLATFORMS:
+    for platform in platforms:
         account = by_id.get(wanted[platform])
         if not account:
             raise Stop(f"Post for Me says the configured {platform} account is disconnected. Run ./autopilot setup")
         if account.get("platform") != platform:
             raise Stop(f"Configured {platform} account is actually {account.get('platform')}; not posting. Run ./autopilot setup")
+        if platform not in expected:
+            raise Stop(f"No expected {platform} handle is set, so I won't post there (not guessing).")
+        if _handle(account.get("username")) != _handle(expected[platform]):
+            raise Stop(f"Connected {platform} account is @{account.get('username')}, not @{_handle(expected[platform])}; not posting.")
         verified[platform] = account
     return verified
 
@@ -262,7 +284,7 @@ def latest_episodes(limit=5):
 BURNED_IN_BAND = "0.10:0.80"   # Anya's own captions sit in the bottom ~18% of the frame; use the band above them
 
 
-def render_episode(url, band=None, ep_dir=None):
+def render_episode(url, band=None, ep_dir=None, force=False):
     summary = Path(tempfile.mkstemp(prefix="pursuit_summary_", suffix=".json")[1])
     summary.unlink()
     # call python directly (not the bash launcher): launchd may not let /bin/bash read files in ~/Documents
@@ -271,6 +293,8 @@ def render_episode(url, band=None, ep_dir=None):
     if band:
         # same picks as before (analysis is cached); re-render the videos from the top part of the frame only
         cmd += ["--crop-band", band, "--force-render"]
+    elif force:
+        cmd += ["--force-render"]   # never trust MP4s left over from manual runs with older code
     log("Rendering clips: " + " ".join(cmd[1:]))
     env = dict(os.environ, PURSUIT_NO_OPEN="1",
                PATH="/opt/homebrew/bin:" + str(Path.home() / ".local/bin") + ":" + os.environ.get("PATH", "/usr/bin:/bin"))
@@ -468,32 +492,35 @@ def hashtags(ac):
     return " ".join("#" + re.sub(r"\W", "", h.lstrip("#")) for h in (ac.get("hashtags") or [])[:5] if h)
 
 
-def build_post(clip, meta, accounts, media_url, when, external_id):
+def build_post(clip, meta, accounts, media_url, when, external_id, platforms=None):
+    platforms = platforms or [p for p in PLATFORMS if p in accounts]
     ac = clip["analysis"]
     caption = (ac.get("caption") or "").strip()
     tags = hashtags(ac)
     social_caption = caption + (f"\n\n{tags}" if tags else "")
     yt_desc = (f"{caption}\n\nFull episode: {meta['title']}\n{meta['url']}\n\n"
                f"PURSUIT with Anya Postnikov\n{tags} #shorts").strip()
+    configs = {
+        "youtube": {"title": ac["youtube_title"][:95], "description": yt_desc[:4900], "privacy_status": "public",
+                    "made_for_kids": False, "tags": [t.lstrip("#") for t in tags.split()][:10]},
+        "instagram": {"placement": "reels", "share_to_feed": True},
+        "tiktok": {"privacy_status": "public", "allow_comment": True, "allow_duet": True, "allow_stitch": True,
+                   "disclose_your_brand": False, "disclose_branded_content": False, "is_ai_generated": False},
+    }
     return {
         "caption": social_caption,
-        "social_accounts": [accounts[p] for p in PLATFORMS],
+        "social_accounts": [accounts[p] for p in platforms],
         "media": [{"url": media_url}],
         "scheduled_at": when.astimezone(dt.timezone.utc).isoformat().replace("+00:00", "Z"),
         "external_id": external_id,
-        "platform_configurations": {
-            "youtube": {"title": ac["youtube_title"][:95], "description": yt_desc[:4900], "privacy_status": "public",
-                        "made_for_kids": False, "tags": [t.lstrip("#") for t in tags.split()][:10]},
-            "instagram": {"placement": "reels", "share_to_feed": True},
-            "tiktok": {"privacy_status": "public", "allow_comment": True, "allow_duet": True, "allow_stitch": True,
-                       "disclose_your_brand": False, "disclose_branded_content": False, "is_ai_generated": False},
-        },
+        "platform_configurations": {p: configs[p] for p in platforms},
     }
 
 
-def schedule_clips(passed, summary, dry_run):
+def schedule_clips(passed, summary, dry_run, slots=None):
     cfg = load(CONFIG_FILE, {})
     accounts = cfg.get("accounts") or {}
+    platforms = [p for p in PLATFORMS if p in accounts] or PLATFORMS
     ledger = load(LEDGER_FILE, {"posts": []})
     meta = summary["meta"]
     todo = [c for c in sorted(passed, key=lambda c: -float(c.get("score") or 0))[:MAX_CLIPS_POST]]
@@ -502,14 +529,15 @@ def schedule_clips(passed, summary, dry_run):
         log("Nothing new to schedule.")
         return []
     if not dry_run:
-        configured_accounts(cfg)
-    slots = next_slots(ledger, len(todo))
+        platforms = list(configured_accounts(cfg))   # verified handles only
+    account_ids = [accounts[p] for p in platforms] if not dry_run else []
+    slots = slots or next_slots(ledger, len(todo))
     done = []
     for clip, when in zip(todo, slots):
         eid = ext_id(meta, clip)
         mp4 = Path(summary["ep_dir"]) / clip["file"]
         if dry_run:
-            log(f"  [dry-run] would schedule {clip['folder']} for {when:%a %b %d %H:%M} -> {', '.join(PLATFORMS)}")
+            log(f"  [dry-run] would schedule {clip['folder']} for {when:%a %b %d %H:%M} -> {', '.join(platforms)}")
             done.append(eid)
             continue
         # idempotency: if a post with this id exists (e.g. an earlier run timed out), adopt it; never post twice
@@ -517,24 +545,26 @@ def schedule_clips(passed, summary, dry_run):
         if len(existing) > 1:
             raise Stop(f"Multiple Post for Me posts have external_id {eid}; not posting or guessing.")
         if existing:
-            post = validate_post(existing[0], eid, [accounts[p] for p in PLATFORMS], when, newly_created=False)
+            post = validate_post(existing[0], eid, account_ids, when, newly_created=False)
             when = dt.datetime.fromisoformat(post["scheduled_at"].replace("Z", "+00:00")).astimezone(TZ)
             log(f"  found existing post for {eid}; not creating another")
         else:
             media_url = upload_media(mp4)
-            body = build_post(clip, meta, accounts, media_url, when, eid)
+            body = build_post(clip, meta, accounts, media_url, when, eid, platforms)
             try:
                 post = api("POST", "/v1/social-posts", body)
             except Ambiguous as e:
                 # record it as unknown so the next run looks it up instead of re-posting
                 ledger["posts"].append({"external_id": eid, "status": "unknown", "scheduled_at": when.isoformat(),
-                                        "clip": clip["folder"], "episode": meta["id"], "error": str(e)})
+                                        "clip": clip["folder"], "episode": meta["id"], "platforms": platforms,
+                                        "error": str(e)})
                 save(LEDGER_FILE, ledger)
                 raise Stop(f"Unclear whether {clip['folder']} was scheduled: {e}. Will check again next run.")
-            post = validate_post(post, eid, [accounts[p] for p in PLATFORMS], when, newly_created=True)
+            post = validate_post(post, eid, account_ids, when, newly_created=True)
         ledger["posts"].append({"external_id": eid, "post_id": post["id"], "status": "scheduled",
                                 "scheduled_at": when.isoformat(), "clip": clip["folder"], "episode": meta["id"],
                                 "episode_title": meta["title"], "youtube_title": clip["analysis"]["youtube_title"],
+                                "category": clip["analysis"].get("category", ""), "platforms": platforms,
                                 "file": str(mp4), "results": {}})
         save(LEDGER_FILE, ledger)
         log(f"  scheduled {clip['folder']} for {when:%a %b %d %H:%M} (post {post['id']})")
@@ -567,7 +597,7 @@ def reconcile(dry_run=False):
             if len(found) > 1:
                 raise Stop(f"Multiple Post for Me posts have external_id {p['external_id']}; not guessing.")
             if found:
-                post = validate_post(found[0], p["external_id"], [accounts[x] for x in PLATFORMS],
+                post = validate_post(found[0], p["external_id"], [accounts[x] for x in p.get("platforms", PLATFORMS)],
                                      dt.datetime.fromisoformat(p["scheduled_at"]), newly_created=False)
                 remote_when = dt.datetime.fromisoformat(post["scheduled_at"].replace("Z", "+00:00")).astimezone(TZ)
                 p.update(post_id=post["id"], status="scheduled", scheduled_at=remote_when.isoformat(), results={})
@@ -583,14 +613,15 @@ def reconcile(dry_run=False):
             continue
         res = api("GET", "/v1/social-post-results", query={"post_id": p["post_id"], "limit": 10}).get("data", [])
         by_acct = {r["social_account_id"]: r for r in res}
-        pending = [plat for plat in PLATFORMS if accounts.get(plat) not in by_acct]
+        post_platforms = p.get("platforms", PLATFORMS)
+        pending = [plat for plat in post_platforms if accounts.get(plat) not in by_acct]
         if pending:
             if now() > due + dt.timedelta(hours=6):
                 problems.append(f"{p['clip']}: no result from {', '.join(pending)} 6h after posting time.")
                 p["status"] = "unclear"
                 changed = True
             continue
-        for plat in PLATFORMS:
+        for plat in post_platforms:
             r = by_acct[accounts[plat]]
             url = (r.get("platform_data") or {}).get("url")
             p["results"][plat] = {"success": bool(r.get("success")), "url": url, "error": r.get("error")}
@@ -613,14 +644,10 @@ def reconcile(dry_run=False):
 
 # ------------------------------------------------------------------------------ run
 
-def process_episode(ep, state, dry_run, use_claude=True):
-    rec = state["episodes"].setdefault(ep["id"], {"title": ep["title"], "attempts": 0})
-    rec["attempts"] += 1
-    rec["last_attempt"] = now().isoformat()
-    if not dry_run:
-        save(STATE_FILE, state)
-    log(f"New episode: {ep['title']} ({ep['url']}), attempt {rec['attempts']}")
-    summary = render_episode(ep["url"])
+def render_and_check(ep, rec, use_claude=True):
+    """Render + QC one episode (re-cropping if Anya's captions are burned in). Returns (summary, passed, report)."""
+    summary = render_episode(ep["url"], force=not rec.get("rendered_by_autopilot"))
+    rec["rendered_by_autopilot"] = True
     passed, report, doubles, broken_frac = check_episode(summary, use_claude)
     if doubles:
         log("QC saw captions burned into the source video: re-rendering from the top of the frame (drops her caption band).")
@@ -630,28 +657,159 @@ def process_episode(ep, state, dry_run, use_claude=True):
             passed = []
             report.append("Burned-in captions still visible after re-cropping.")
     n = len(summary["clips"])
-    suspect = broken_frac > MAX_FAIL_FRACTION
-    if n == 0 or len(passed) == 0 or suspect:
-        rec.update(status="rejected", report=report)   # a verdict, not a crash: don't retry this episode
-        if not dry_run:
-            save(STATE_FILE, state)
+    if n == 0 or not passed or broken_frac > MAX_FAIL_FRACTION:
         cleanup_source(summary)
-    if n == 0 or len(passed) == 0:
-        raise Stop(f"No clip from '{ep['title']}' passed the checks. Nothing posted.\n" + "\n".join(report))
-    if suspect:
-        raise Stop(f"Most postable clips from '{ep['title']}' failed checks, so the whole batch is suspect. Nothing posted.\n"
-                   + "\n".join(report))
-    scheduled = schedule_clips(passed, summary, dry_run)
+        rec.update(status="rejected", report=report, finished=now().isoformat())   # a verdict: don't retry
+        why = "No clip passed the checks" if n == 0 or not passed else \
+              "Most postable clips failed checks, so the whole batch is suspect"
+        raise Stop(f"{why} for '{summary['meta']['title']}'. Nothing queued.\n" + "\n".join(report))
     cleanup_source(summary)
-    rec.update(status="dry_run" if dry_run else "done", clips_rendered=n, clips_passed=len(passed),
-               scheduled=scheduled, report=report, finished=now().isoformat())
-    if not dry_run:
-        state["last_processed_video_id"] = ep["id"]
+    return summary, passed, report
+
+
+def process_episode(ep, state, dry_run, use_claude=True, fresh=True):
+    """Render, check and add the good clips to the approved queue. Posting happens from the queue (fill_schedule)."""
+    rec = state["episodes"].setdefault(ep["id"], {"title": ep["title"], "attempts": 0})
+    rec["attempts"] += 1
+    rec["last_attempt"] = now().isoformat()
     if not dry_run:
         save(STATE_FILE, state)
-    msg = f"{len(scheduled)} clips {'would be ' if dry_run else ''}scheduled from '{ep['title']}' ({n - len(passed)} held back)."
+    log(f"{'New' if fresh else 'Back-catalog'} episode: {ep['title']} ({ep['url']}), attempt {rec['attempts']}")
+    try:
+        summary, passed, report = render_and_check(ep, rec, use_claude)
+    finally:
+        if not dry_run:
+            save(STATE_FILE, state)
+    added = [] if dry_run else add_to_queue(passed, summary, fresh)
+    n = len(summary["clips"])
+    rec.update(status="dry_run" if dry_run else "queued", title=summary["meta"]["title"], clips_rendered=n,
+               clips_passed=len(passed), queued=added, report=report, finished=now().isoformat())
+    if not dry_run:
+        if fresh:
+            state["last_processed_video_id"] = ep["id"]
+        save(STATE_FILE, state)
+    msg = f"{len(passed)} approved clips {'found' if dry_run else 'queued'} from '{summary['meta']['title']}' ({n - len(passed)} held back)."
     notify("PURSUIT autopilot", msg)
     return msg
+
+
+# ------------------------------------------------------------------------------ approved queue
+
+def add_to_queue(passed, summary, fresh):
+    queue = load(QUEUE_FILE, {"clips": []})
+    ledger_ids = {p["external_id"] for p in load(LEDGER_FILE, {"posts": []})["posts"]}
+    have = {q["external_id"] for q in queue["clips"]} | ledger_ids
+    meta, added = summary["meta"], []
+    for clip in passed:
+        eid = ext_id(meta, clip)
+        if eid in have:
+            continue
+        row = {k: v for k, v in clip.items() if k != "analysis"}
+        queue["clips"].append({"external_id": eid, "status": "queued", "fresh": fresh, "added": now().isoformat(),
+                               "score": float(clip.get("score") or 0), "category": clip["analysis"].get("category", ""),
+                               "episode": meta["id"], "episode_title": meta["title"], "ep_dir": summary["ep_dir"],
+                               "meta": meta, "clip": row, "analysis": clip["analysis"]})
+        added.append(eid)
+    save(QUEUE_FILE, queue)
+    return added
+
+
+def pick_next(queue, ledger, n):
+    """Best clips first, but new-episode clips get a boost and we avoid repeating an episode/topic back to back."""
+    posted = {p["external_id"] for p in ledger["posts"]}
+    pool = [q for q in queue["clips"] if q["status"] == "queued" and q["external_id"] not in posted]
+    history = sorted(ledger["posts"], key=lambda p: p["scheduled_at"])[-3:]
+    recent_eps = [p.get("episode") for p in history]
+    recent_cats = [p.get("category") for p in history]
+    picks = []
+    while pool and len(picks) < n:
+        def value(q):
+            return (q["score"] + (15 if q.get("fresh") else 0)
+                    - (25 if q["episode"] in recent_eps[-2:] else 0) - (8 if q["category"] and q["category"] in recent_cats[-2:] else 0))
+        best = max(pool, key=value)
+        pool.remove(best)
+        picks.append(best)
+        recent_eps.append(best["episode"])
+        recent_cats.append(best["category"])
+    return picks
+
+
+def queue_slots(ledger, n):
+    """Next POST_HOURS slots, at least 30 min from now and at least 2h after the last scheduled post."""
+    last = max((dt.datetime.fromisoformat(p["scheduled_at"]) for p in ledger["posts"]), default=None)
+    earliest = now() + dt.timedelta(minutes=30)
+    if last:
+        earliest = max(earliest, last.astimezone(TZ) + dt.timedelta(hours=2))
+    slots, day = [], earliest.date()
+    while len(slots) < n:
+        for h in POST_HOURS:
+            t = dt.datetime.combine(day, dt.time(h), TZ)
+            if t >= earliest and len(slots) < n:
+                slots.append(t)
+        day += dt.timedelta(days=1)
+    return slots
+
+
+def schedule_from_queue(item, when):
+    """Schedule one queued clip through the normal (duplicate-safe, fail-closed) scheduling path."""
+    queue = load(QUEUE_FILE, {"clips": []})
+    mp4 = Path(item["ep_dir"]) / item["clip"]["file"]
+    if not mp4.exists():   # you deleted it = you vetoed it
+        for q in queue["clips"]:
+            if q["external_id"] == item["external_id"]:
+                q["status"] = "removed"
+        save(QUEUE_FILE, queue)
+        log(f"  {item['clip']['folder']} was deleted from disk; dropping it from the queue.")
+        return None
+    summary = {"ep_dir": item["ep_dir"], "meta": item["meta"]}
+    done = schedule_clips([dict(item["clip"], analysis=item["analysis"])], summary, dry_run=False, slots=[when])
+    if done != [item["external_id"]]:
+        raise Stop(f"Post for Me did not confirm {item['clip']['folder']}; inspect the ledger before retrying.")
+    for q in queue["clips"]:
+        if q["external_id"] == item["external_id"]:
+            q["status"] = "scheduled"
+    save(QUEUE_FILE, queue)
+    return done[0]
+
+
+def fill_schedule():
+    """Keep SCHEDULE_AHEAD queued clips scheduled on Post for Me. Only when auto-posting was explicitly enabled."""
+    cfg = load(CONFIG_FILE, {})
+    if not cfg.get("auto_posting"):
+        return 0
+    ledger = load(LEDGER_FILE, {"posts": []})
+    ahead = [p for p in ledger["posts"] if p["status"] in ("scheduled", "unknown")
+             and dt.datetime.fromisoformat(p["scheduled_at"]) > now()]
+    need = SCHEDULE_AHEAD - len(ahead)
+    if need <= 0:
+        return 0
+    configured_accounts(cfg)
+    picks = pick_next(load(QUEUE_FILE, {"clips": []}), ledger, need)
+    count = 0
+    for item in picks:
+        when = queue_slots(load(LEDGER_FILE, {"posts": []}), 1)[0]
+        if schedule_from_queue(item, when):
+            count += 1
+    if not picks:
+        log("Approved queue is empty.")
+    return count
+
+
+def backlog_step(state, limit, use_claude=True):
+    """Process up to `limit` old episodes that haven't been handled yet (newest first). Queue only, never posts."""
+    eps = latest_episodes(limit=300)
+    todo = [e for e in eps if state["episodes"].get(e["id"], {}).get("status") not in
+            ("queued", "done", "rejected", "gave_up", "live_test")
+            and state["episodes"].get(e["id"], {}).get("attempts", 0) < MAX_ATTEMPTS]
+    msgs = []
+    for ep in todo[:limit]:
+        try:
+            msgs.append(process_episode(ep, state, dry_run=False, use_claude=use_claude, fresh=False))
+        except Stop as e:
+            msgs.append(str(e).splitlines()[0])
+            log(f"Back catalog: {e}")
+    left = len(todo) - min(limit, len(todo))
+    return msgs, left
 
 
 def write_status(extra=""):
@@ -662,7 +820,17 @@ def write_status(extra=""):
         lines += ["*** PAUSED *** (run ./autopilot resume to turn back on)", ""]
     if extra:
         lines += [extra, ""]
+    cfg = load(CONFIG_FILE, {})
+    queue = [q for q in load(QUEUE_FILE, {"clips": []})["clips"] if q["status"] == "queued"]
+    eps = state.get("episodes", {})
+    lines.append(f"Posting to: {', '.join(f'{k} @{v}' for k, v in (cfg.get('usernames') or {}).items()) or '(no verified account)'}")
+    lines.append(f"Auto-posting: {'ON' if cfg.get('auto_posting') else 'OFF (run the one-clip live test first)'}")
+    lines.append(f"Episodes processed: {sum(1 for e in eps.values() if e.get('status') == 'queued')} queued, "
+                 f"{sum(1 for e in eps.values() if e.get('status') == 'rejected')} rejected")
     lines.append(f"Last processed episode: {state.get('last_processed_video_id', '(none yet)')}")
+    lines += ["", f"Approved queue ({len(queue)} clips, best first):"]
+    for q in sorted(queue, key=lambda q: -q["score"])[:15]:
+        lines.append(f"  {q['score']:>3.0f}  {q['clip']['folder'][:50]:50}  [{q['episode_title'][:40]}]")
     upcoming = [p for p in ledger["posts"] if p["status"] == "scheduled"]
     lines += ["", f"Scheduled ({len(upcoming)}):"]
     lines += [f"  {dt.datetime.fromisoformat(p['scheduled_at']):%a %b %d %H:%M}  {p['clip']}" for p in upcoming]
@@ -701,37 +869,17 @@ def cmd_run(args, only_url=None):
             if not vid:
                 raise Stop("That doesn't look like a YouTube video URL.")
             ep = {"id": vid.group(1), "title": vid.group(1), "url": only_url}
-            if not args.dry_run:
-                configured_accounts(load(CONFIG_FILE, {}))
-            extra = process_episode(ep, state, args.dry_run, not args.no_claude_qc)
+            extra = process_episode(ep, state, args.dry_run, not args.no_claude_qc, fresh=False)
             return
-        eps = latest_episodes()
-        if not eps:
-            raise Stop("Found no episodes on the channel page. yt-dlp may need an update: brew upgrade yt-dlp deno")
-        if "baseline_video_id" not in state:
-            # first run ever: don't dig up old episodes; start with the next one Anya uploads
-            state["baseline_video_id"] = state["last_processed_video_id"] = eps[0]["id"]
-            if not args.dry_run:
-                save(STATE_FILE, state)
-            log(f"First run{' dry-run' if args.dry_run else ''}: baseline {'would be ' if args.dry_run else ''}set to newest episode '{eps[0]['title']}'. Waiting for the next one.")
-            extra = f"Watching for episodes newer than: {eps[0]['title']}"
-            return
-        newest = eps[0]
-        if newest["id"] == state.get("last_processed_video_id"):
-            log("No new episode.")
-            return
-        rec = state["episodes"].get(newest["id"], {})
-        if rec.get("status") in ("done", "gave_up", "rejected"):
-            log(f"Newest episode already handled ({rec['status']}).")
-            return
-        if rec.get("attempts", 0) >= MAX_ATTEMPTS:
-            rec["status"] = "gave_up"
-            save(STATE_FILE, state)
-            notify("PURSUIT autopilot needs you", f"Gave up on '{newest['title']}' after {MAX_ATTEMPTS} tries. See {STATUS_FILE}")
-            return
+        extra = check_new_episode(args, state) or ""
         if not args.dry_run:
-            configured_accounts(load(CONFIG_FILE, {}))
-        extra = process_episode(newest, state, args.dry_run, not args.no_claude_qc)
+            if load(CONFIG_FILE, {}).get("backlog", True):
+                msgs, left = backlog_step(state, BACKLOG_PER_RUN, not args.no_claude_qc)
+                if msgs:
+                    extra = (extra + "\n" if extra else "") + "Back catalog: " + " | ".join(msgs) + f" ({left} episodes left)"
+            n = fill_schedule()
+            if n:
+                extra = (extra + "\n" if extra else "") + f"Scheduled {n} clip(s) from the approved queue."
     except Stop as e:
         extra = f"STOPPED (nothing questionable was posted): {e}"
         notify("PURSUIT autopilot stopped", str(e).splitlines()[0])
@@ -748,6 +896,34 @@ def cmd_run(args, only_url=None):
     finally:
         write_status(extra)
         lock.close()
+
+
+def check_new_episode(args, state):
+    """Queue clips from a newly uploaded episode. Returns a status line (or None)."""
+    eps = latest_episodes()
+    if not eps:
+        raise Stop("Found no episodes on the channel page. yt-dlp may need an update: brew upgrade yt-dlp deno")
+    if "baseline_video_id" not in state:
+        # first run ever: don't dig up old episodes; start with the next one Anya uploads
+        state["baseline_video_id"] = state["last_processed_video_id"] = eps[0]["id"]
+        if not args.dry_run:
+            save(STATE_FILE, state)
+        log(f"First run{' dry-run' if args.dry_run else ''}: baseline {'would be ' if args.dry_run else ''}set to newest episode '{eps[0]['title']}'.")
+        return f"Watching for episodes newer than: {eps[0]['title']}"
+    newest = eps[0]
+    if newest["id"] == state.get("last_processed_video_id"):
+        log("No new episode.")
+        return None
+    rec = state["episodes"].get(newest["id"], {})
+    if rec.get("status") in ("done", "gave_up", "rejected", "queued", "live_test"):
+        log(f"Newest episode already handled ({rec['status']}).")
+        return None
+    if rec.get("attempts", 0) >= MAX_ATTEMPTS:
+        rec["status"] = "gave_up"
+        save(STATE_FILE, state)
+        notify("PURSUIT autopilot needs you", f"Gave up on '{newest['title']}' after {MAX_ATTEMPTS} tries. See {STATUS_FILE}")
+        return None
+    return process_episode(newest, state, args.dry_run, not args.no_claude_qc)
 
 
 # ------------------------------------------------------------------------------ setup / misc
@@ -784,8 +960,7 @@ def cmd_setup(args):
     cfg = load(CONFIG_FILE, {"accounts": {}})
     accounts = setup_account_map()
     for plat in PLATFORMS:
-        if plat in accounts and not args.reconnect:
-            print(f"  {plat}: connected as @{accounts[plat].get('username')}")
+        if plat not in (args.connect or []) and not (args.reconnect and plat in accounts):
             continue
         body = {"platform": plat, "external_id": f"pursuit-{plat}"}
         if plat == "instagram":
@@ -799,23 +974,37 @@ def cmd_setup(args):
             print(f"  !! {plat} doesn't show as connected yet. Re-run ./autopilot setup to try again.")
         else:
             print(f"  {plat}: connected as @{accounts[plat].get('username')}")
-    cfg["accounts"] = {p: accounts[p]["id"] for p in PLATFORMS if p in accounts}
-    cfg["usernames"] = {p: accounts[p].get("username") for p in PLATFORMS if p in accounts}
+    expected = dict(EXPECTED_USERNAMES, **(cfg.get("expected_usernames") or {}))
+    cfg["accounts"], cfg["usernames"] = {}, {}
+    print("Accounts in Post for Me:")
+    for plat in PLATFORMS:
+        acct = accounts.get(plat)
+        if not acct:
+            print(f"  {plat:9} not connected")
+        elif plat not in expected:
+            print(f"  {plat:9} @{acct.get('username')}: NOT enabled (no expected handle set; not guessing)")
+        elif _handle(acct.get("username")) != _handle(expected[plat]):
+            print(f"  {plat:9} @{acct.get('username')}: NOT enabled (expected @{_handle(expected[plat])})")
+        else:
+            cfg["accounts"][plat], cfg["usernames"][plat] = acct["id"], acct.get("username")
+            print(f"  {plat:9} @{acct.get('username')}: verified ✓")
     save(CONFIG_FILE, cfg)
-    missing = [p for p in PLATFORMS if p not in cfg["accounts"]]
-    print("\nAll three accounts connected. ✓" if not missing else f"\nStill missing: {', '.join(missing)}")
-    print("Next: ./autopilot test-post   (checks everything with a draft that is never published)\n")
+    if not cfg["accounts"]:
+        print("\nNo verified account yet, so nothing can be posted.")
+    else:
+        print(f"\nWill post only to: {', '.join(cfg['accounts'])}")
+        print("Next: ./autopilot test-post   (checks everything with a draft that is never published)\n")
 
 
 def cmd_test_post(args):
     """Upload a real clip and create a *draft* post (isDraft: never processed/published), then delete the draft."""
     cfg = load(CONFIG_FILE, {})
     accounts = cfg.get("accounts") or {}
-    if any(p not in accounts for p in PLATFORMS):
+    if not accounts:
         sys.exit("Connect accounts first: ./autopilot setup")
     live = configured_accounts(cfg)
-    for p in PLATFORMS:
-        print(f"  {p}: connected (@{live[p].get('username') or cfg.get('usernames', {}).get(p)})")
+    for p in live:
+        print(f"  {p}: connected and verified (@{live[p].get('username')})")
     clips = sorted(OUT_DIR.glob("*/[0-9][0-9]_*/*.mp4"))
     if not clips:
         sys.exit("No rendered clip found to test with.")
@@ -824,12 +1013,12 @@ def cmd_test_post(args):
     media_url = upload_media(mp4)
     external_id = f"pursuit-test-{int(time.time())}"
     post = api("POST", "/v1/social-posts", {"caption": "PURSUIT autopilot connection test (draft, never published)",
-                                            "social_accounts": [accounts[p] for p in PLATFORMS],
+                                            "social_accounts": [accounts[p] for p in live],
                                             "media": [{"url": media_url}], "isDraft": True,
                                             "external_id": external_id})
     print(f"  draft created: {post.get('id')} status={post.get('status')}")
     if (not post.get("id") or post.get("status") != "draft" or post.get("external_id") != external_id
-            or set(_post_account_ids(post)) != set(accounts.values())):
+            or set(_post_account_ids(post)) != {accounts[p] for p in live}):
         if post.get("id"):
             try:
                 api("DELETE", f"/v1/social-posts/{post['id']}")
@@ -841,12 +1030,10 @@ def cmd_test_post(args):
 
 
 def cmd_live_test(args):
-    """Explicitly schedule one fully checked clip. Never called by launchd."""
+    """Explicitly schedule ONE clip from the approved queue, after showing it and asking for typed confirmation.
+    Never called by launchd."""
     if not sys.stdin.isatty():
         raise Stop("The one-clip live test requires an interactive Terminal.")
-    match = re.search(r"(?:v=|youtu\.be/)([\w-]{11})", args.url)
-    if not match:
-        raise Stop("That doesn't look like a YouTube episode URL.")
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with open(LOCK_FILE, "w") as lock:
         try:
@@ -854,53 +1041,80 @@ def cmd_live_test(args):
         except BlockingIOError:
             raise Stop("Another autopilot run is in progress. Try again after it finishes.")
         cfg = load(CONFIG_FILE, {})
-        live = configured_accounts(cfg)
-        meta = pc.fetch_info(args.url)
-        summary = render_episode(args.url)
-        passed, report, doubles, broken_frac = check_episode(summary, use_claude=True)
-        if doubles:
-            log("QC found source captions; re-rendering with the safe crop band.")
-            summary = render_episode(args.url, band=BURNED_IN_BAND, ep_dir=summary["ep_dir"])
-            passed, report, doubles, broken_frac = check_episode(summary, use_claude=True, check_all_visually=True)
-        if doubles or not passed or broken_frac > MAX_FAIL_FRACTION:
-            raise Stop("The one-clip batch did not pass QC; nothing was scheduled.\n" + "\n".join(report))
-        clip = max(passed, key=lambda c: float(c.get("score") or 0))
+        live = configured_accounts(cfg)          # API key works + every destination is the verified handle
         ledger = load(LEDGER_FILE, {"posts": []})
-        eid = ext_id(summary["meta"], clip)
-        if any(p.get("external_id") == eid for p in ledger["posts"]) or find_posts_by_external_id(eid):
+        queue = load(QUEUE_FILE, {"clips": []})
+        if args.clip:
+            items = [q for q in queue["clips"] if q["status"] == "queued" and args.clip in q["clip"]["folder"]]
+            if len(items) != 1:
+                raise Stop(f"--clip must match exactly one queued clip (matched {len(items)}).")
+            item = items[0]
+        else:
+            picks = pick_next(queue, ledger, 1)
+            if not picks:
+                raise Stop("The approved queue is empty. Build it first: ./autopilot backlog")
+            item = picks[0]
+        if any(p.get("external_id") == item["external_id"] for p in ledger["posts"]) or \
+                find_posts_by_external_id(item["external_id"]):
             raise Stop("This clip already exists in the local or Post for Me ledger; not scheduling it again.")
-        when = next_slots(ledger, 1)[0]
-        mp4 = Path(summary["ep_dir"]) / clip["file"]
-        ac = clip["analysis"]
+        when = (now() + dt.timedelta(minutes=args.minutes)).replace(second=0, microsecond=0)
+        mp4 = Path(item["ep_dir"]) / item["clip"]["file"]
+        ac = item["analysis"]
         print("\n== CONTROLLED ONE-CLIP LIVE TEST ==")
         print(f"\nMP4: {mp4}")
-        print(f"Episode: {meta['title']}")
-        print(f"YouTube title: {ac['youtube_title']}")
-        print(f"Caption:\n{ac['caption']}\n")
-        print("Destinations:")
-        for platform in PLATFORMS:
-            print(f"  {platform}: @{live[platform].get('username') or '?'} ({live[platform]['id']})")
-        print(f"Scheduled time: {when:%A %B %d, %Y at %I:%M %p %Z}")
-        print("\nThe video is opening for final review. This command can schedule only this one clip.")
+        print(f"Episode: {item['episode_title']}")
+        print(f"Score: {item['score']:.0f}   Title: {ac.get('youtube_title')}")
+        print(f"Caption:\n{build_post(dict(item['clip'], analysis=ac), item['meta'], cfg['accounts'], '', when, '', list(live))['caption']}\n")
+        print("Destinations (verified):")
+        for platform, acct in live.items():
+            print(f"  {platform}: @{acct.get('username')}")
+        print(f"Goes live: {when:%A %B %d at %I:%M %p %Z}")
+        print("\nThe video is opening for a final look. This command schedules only this one clip.")
         subprocess.run(["open", str(mp4)], check=False)
         confirmation = input('\nType POST ONE CLIP exactly to continue: ').strip()
         if confirmation != "POST ONE CLIP":
-            cleanup_source(summary)
             print("Cancelled. Nothing was scheduled.")
             return
-        scheduled = schedule_clips([clip], summary, dry_run=False)
-        cleanup_source(summary)
-        if scheduled != [eid]:
+        eid = schedule_from_queue(item, when)
+        if eid != item["external_id"]:
             raise Stop("Post for Me did not confirm exactly one scheduled clip; inspect the ledger before retrying.")
-        state = load(STATE_FILE, {"episodes": {}})
-        state.setdefault("episodes", {})[meta["id"]] = {
-            "title": meta["title"], "status": "live_test", "scheduled": scheduled,
-            "clips_rendered": len(summary["clips"]), "clips_passed": len(passed), "finished": now().isoformat(),
-        }
-        state["last_processed_video_id"] = meta["id"]
-        save(STATE_FILE, state)
-        write_status(f"Controlled live test scheduled: {clip['folder']}")
+        write_status(f"Controlled live test scheduled: {item['clip']['folder']} at {when:%a %b %d %H:%M}")
+        print(f"\nScheduled. ✓  Check TikTok after {when:%I:%M %p}, then run ./autopilot status")
         notify("PURSUIT live test scheduled", f"One clip scheduled for {when:%a %b %d at %I:%M %p}.")
+
+
+def cmd_auto_post(args):
+    cfg = load(CONFIG_FILE, {})
+    if args.state == "off":
+        cfg["auto_posting"] = False
+        save(CONFIG_FILE, cfg)
+        print("Auto-posting OFF. Clips keep going into the approved queue; nothing new gets scheduled.")
+        return
+    ledger = load(LEDGER_FILE, {"posts": []})
+    if not any(p["status"] == "posted" for p in ledger["posts"]):
+        raise Stop("No post has been confirmed live yet. Do the one-clip live test first and let it go out "
+                   "(./autopilot status shows it as [posted]).")
+    configured_accounts(cfg)
+    cfg["auto_posting"] = True
+    save(CONFIG_FILE, cfg)
+    print(f"Auto-posting ON: approved clips go out at {', '.join(f'{h}:00' for h in POST_HOURS)} "
+          f"(keeping {SCHEDULE_AHEAD} scheduled ahead).")
+
+
+def cmd_backlog(args):
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOCK_FILE, "w") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            raise Stop("Another autopilot run is in progress. Try again after it finishes.")
+        state = load(STATE_FILE, {"episodes": {}})
+        state.setdefault("episodes", {})
+        msgs, left = backlog_step(state, args.limit)
+        for m in msgs:
+            print(" -", m)
+        write_status(f"Back catalog: processed {len(msgs)}, {left} left")
+        print(f"{left} old episodes left (the scheduled runs keep going, {BACKLOG_PER_RUN} per run).")
 
 
 def cmd_status(args):
@@ -921,12 +1135,18 @@ def main():
     s = sub.add_parser("setup")
     s.add_argument("--new-key", action="store_true")
     s.add_argument("--reconnect", action="store_true")
+    s.add_argument("--connect", nargs="*", choices=PLATFORMS, help="open the connect flow for these platforms")
     sub.add_parser("status")
     sub.add_parser("pause")
     sub.add_parser("resume")
     sub.add_parser("test-post")
-    live = sub.add_parser("live-test", help="interactively schedule exactly one checked clip")
-    live.add_argument("url")
+    live = sub.add_parser("live-test", help="interactively schedule exactly one clip from the approved queue")
+    live.add_argument("--clip", help="part of a queued clip's folder name (default: the best one)")
+    live.add_argument("--minutes", type=int, default=20, help="minutes from now (default 20)")
+    b = sub.add_parser("backlog", help="process old episodes into the approved queue (never posts)")
+    b.add_argument("--limit", type=int, default=5)
+    a = sub.add_parser("auto-post", help="turn scheduled posting from the queue on/off")
+    a.add_argument("state", choices=["on", "off"])
     args = ap.parse_args()
     try:
         if args.cmd == "run":
@@ -939,6 +1159,10 @@ def main():
             cmd_test_post(args)
         elif args.cmd == "live-test":
             cmd_live_test(args)
+        elif args.cmd == "backlog":
+            cmd_backlog(args)
+        elif args.cmd == "auto-post":
+            cmd_auto_post(args)
         elif args.cmd == "status":
             cmd_status(args)
         elif args.cmd == "pause":

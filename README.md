@@ -95,7 +95,7 @@ cd ~/Documents/PURSUIT_CLIPS_TOOL
 ./autopilot setup
 ```
 
-The API key is entered without echo and stored in macOS Keychain, not in this repository. Three Post for Me OAuth windows open. In each window, carefully verify that you are authorizing the intended PURSUIT account. The tool refuses to guess when multiple accounts for one platform are connected.
+The API key is entered without echo and stored in macOS Keychain, not in this repository. Setup reads the accounts already connected in the Post for Me dashboard and enables a platform **only** if its handle matches the expected one (`EXPECTED_USERNAMES` in `autopilot.py`; currently TikTok `@pursuitthepod`). Anything else is listed but not used. To open a connect flow from here: `./autopilot setup --connect youtube instagram`. The tool refuses to guess when multiple accounts for one platform are connected.
 
 The optional `PURSUIT_POSTFORME_KEY` environment variable is supported for development, but Keychain is the recommended local setup. Never commit a real `.env` file.
 
@@ -115,13 +115,20 @@ Rehearse a complete episode without creating any posts or changing production st
 ./autopilot process "YOUTUBE_URL" --dry-run
 ```
 
+Build the approved queue from old episodes (renders + QC only, never posts):
+
+```bash
+./autopilot backlog --limit 5
+```
+
 For the first controlled live test:
 
 ```bash
-./autopilot live-test "YOUTUBE_URL"
+./autopilot live-test                 # best clip in the queue, goes live in 20 minutes
+./autopilot live-test --clip SOME-NAME --minutes 30
 ```
 
-The command performs the full pipeline and QC, chooses exactly one passing clip, shows the destination accounts and schedule, and opens the MP4 for review. Nothing is scheduled unless you type `POST ONE CLIP` exactly in an interactive Terminal.
+It verifies the API key and account handles, shows the clip, caption, destinations and time, and opens the MP4. Nothing is scheduled unless you type `POST ONE CLIP` exactly in an interactive Terminal.
 
 ## Autopilot Behavior
 
@@ -131,7 +138,14 @@ Install the LaunchAgent after setup and testing:
 ./install_autopilot.sh
 ```
 
-It checks the PURSUIT YouTube channel at 7:15, 10:15, 13:15, 16:15, 19:15, and 22:15 local time. The first run records the newest episode as its baseline; later uploads are processed automatically. Passing clips are scheduled strongest-first, one per day at 5:00 PM, to all three configured platforms.
+It runs at 7:15, 10:15, 13:15, 16:15, 19:15, and 22:15 local time. Each run: checks the posts that went out, queues clips from any new episode, processes one old episode into the queue, and, **only if auto-posting is on**, keeps 3 approved clips scheduled ahead at 10:00, 14:00 and 19:00. New-episode clips get priority, and the same episode/topic isn't posted back to back. Deleting a clip's folder removes it from the queue.
+
+Auto-posting stays off until one live post has been confirmed:
+
+```bash
+./autopilot auto-post on      # refuses until a live test shows as [posted]
+./autopilot auto-post off
+```
 
 ```bash
 ./autopilot status
@@ -151,7 +165,7 @@ Runtime data is stored outside the repository:
 ## Safety
 
 - **Fail closed:** unexpected pipeline or API responses stop posting.
-- **Strict accounts:** every configured ID must still be connected and match its expected platform.
+- **Strict accounts:** every configured ID must still be connected, match its platform, and have the expected handle. Platforms without a verified handle are never posted to.
 - **Duplicate protection:** a local atomic ledger, deterministic external IDs, remote lookup, and a process lock prevent blind reposting.
 - **Safe retries:** ambiguous network results are recorded and reconciled before another create attempt.
 - **Private atomic state:** state and ledger files are written atomically with mode `0600`.

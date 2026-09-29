@@ -20,12 +20,14 @@ import autopilot as ap  # noqa: E402
 import pursuit_clips as pc  # noqa: E402
 
 ACCOUNTS = {"youtube": "spc_yt", "instagram": "spc_ig", "tiktok": "spc_tt"}
+EXPECTED = {p: "pursuitthepod" for p in ACCOUNTS}   # tests simulate all three verified
 
 
 class FakePostForMe(BaseHTTPRequestHandler):
     posts, uploads, results = {}, {}, {}
     slow_create = False      # simulate: server creates the post but the reply never arrives in time
     disconnected = set()
+    usernames = {}
     fail_platform = None
 
     def log_message(self, *a):
@@ -57,7 +59,7 @@ class FakePostForMe(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         q = parse_qs(u.query)
         if u.path == "/v1/social-accounts":
-            data = [{"id": i, "platform": p, "username": "pursuitthepod", "status": "connected",
+            data = [{"id": i, "platform": p, "username": self.usernames.get(p, "pursuitthepod"), "status": "connected",
                      "external_id": f"pursuit-{p}"}
                     for p, i in ACCOUNTS.items() if i not in self.disconnected]
             return self._json(200, {"data": data, "meta": {}})
@@ -105,7 +107,9 @@ class AutopilotTests(unittest.TestCase):
         FakePostForMe.results.clear()
         FakePostForMe.slow_create = False
         FakePostForMe.disconnected = set()
-        ap.save(ap.CONFIG_FILE, {"accounts": ACCOUNTS})
+        FakePostForMe.usernames = {}
+        ap.QUEUE_FILE.unlink(missing_ok=True)
+        ap.save(ap.CONFIG_FILE, {"accounts": ACCOUNTS, "expected_usernames": EXPECTED})
         self.ep_dir = TMP / "out" / "ep"
         self.clips = []
         for i in range(3):
@@ -174,7 +178,7 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(FakePostForMe.posts, {})
 
     def test_wrong_platform_account_id_stops_before_upload(self):
-        ap.save(ap.CONFIG_FILE, {"accounts": dict(ACCOUNTS, youtube="spc_ig")})
+        ap.save(ap.CONFIG_FILE, {"accounts": dict(ACCOUNTS, youtube="spc_ig"), "expected_usernames": EXPECTED})
         with self.assertRaisesRegex(ap.Stop, "actually instagram"):
             ap.schedule_clips(self.clips, self.summary, dry_run=False)
         self.assertEqual(FakePostForMe.posts, {})
@@ -188,6 +192,103 @@ class AutopilotTests(unittest.TestCase):
         with self.assertRaisesRegex(ap.Stop, "Multiple"):
             ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
         self.assertEqual(len(FakePostForMe.posts), 2)
+
+    # ---- only verified accounts ------------------------------------------------------------
+    def tiktok_only(self):
+        ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt"}})   # real default: EXPECTED_USERNAMES has tiktok only
+
+    def test_tiktok_only_config_posts_only_to_tiktok(self):
+        self.tiktok_only()
+        ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        post = list(FakePostForMe.posts.values())[0]
+        self.assertEqual(post["social_accounts"], ["spc_tt"])
+        self.assertEqual(list(post["platform_configurations"]), ["tiktok"])
+        self.assertEqual(ap.load(ap.LEDGER_FILE, {})["posts"][0]["platforms"], ["tiktok"])
+
+    def test_wrong_tiktok_handle_stops_before_upload(self):
+        self.tiktok_only()
+        FakePostForMe.usernames = {"tiktok": "someone_else"}
+        with self.assertRaisesRegex(ap.Stop, "not @pursuitthepod"):
+            ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        self.assertEqual(FakePostForMe.posts, {})
+
+    def test_platform_without_expected_handle_is_never_used(self):
+        ap.save(ap.CONFIG_FILE, {"accounts": {"tiktok": "spc_tt", "youtube": "spc_yt"}})
+        with self.assertRaisesRegex(ap.Stop, "not guessing"):
+            ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        self.assertEqual(FakePostForMe.posts, {})
+
+    def test_setup_map_enables_only_verified_handles(self):
+        FakePostForMe.usernames = {"youtube": "random_channel"}
+        ap.CONFIG_FILE.unlink()
+        with patch("autopilot.subprocess.run") as run, patch("builtins.print"):
+            run.return_value.returncode = 0   # keychain says the key exists
+            ap.cmd_setup(type("A", (), {"new_key": False, "reconnect": False, "connect": None}))
+        cfg = ap.load(ap.CONFIG_FILE, {})
+        self.assertEqual(cfg["accounts"], {"tiktok": "spc_tt"})
+
+    def test_reconcile_checks_only_the_platforms_a_post_used(self):
+        self.tiktok_only()
+        ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
+        ledger = ap.load(ap.LEDGER_FILE, {})
+        ledger["posts"][0]["scheduled_at"] = (ap.now() - dt.timedelta(hours=1)).isoformat()
+        ap.save(ap.LEDGER_FILE, ledger)
+        FakePostForMe.results[ledger["posts"][0]["post_id"]] = [
+            {"social_account_id": "spc_tt", "success": True, "platform_data": {"url": "https://tiktok.com/@pursuitthepod/video/1"}}]
+        published, problems = ap.reconcile()
+        self.assertEqual(problems, [])
+        self.assertEqual(ap.load(ap.LEDGER_FILE, {})["posts"][0]["status"], "posted")
+
+    # ---- approved queue --------------------------------------------------------------------
+    def queue_two_episodes(self):
+        passed = [dict(c, analysis=dict(c["analysis"], category="running")) for c in self.clips]
+        ap.add_to_queue(passed, self.summary, fresh=False)
+        other = dict(self.summary, meta=dict(self.summary["meta"], id="OTHERVIDEO1", title="Other"))
+        ap.add_to_queue([dict(self.clips[2], score=70, analysis=dict(self.clips[2]["analysis"], category="love"))],
+                        other, fresh=False)
+
+    def test_queue_never_holds_duplicates(self):
+        self.queue_two_episodes()
+        self.queue_two_episodes()
+        ids = [q["external_id"] for q in ap.load(ap.QUEUE_FILE, {})["clips"]]
+        self.assertEqual(len(ids), len(set(ids)))
+        self.assertEqual(len(ids), 4)
+
+    def test_queue_is_not_posted_until_auto_posting_is_enabled(self):
+        self.tiktok_only()
+        self.queue_two_episodes()
+        self.assertEqual(ap.fill_schedule(), 0)
+        self.assertEqual(FakePostForMe.posts, {})
+
+    def test_auto_post_on_requires_a_confirmed_live_post(self):
+        self.tiktok_only()
+        with self.assertRaisesRegex(ap.Stop, "live test"):
+            ap.cmd_auto_post(type("A", (), {"state": "on"}))
+        self.assertFalse(ap.load(ap.CONFIG_FILE, {}).get("auto_posting"))
+
+    def test_fill_schedule_keeps_a_few_ahead_varied_and_no_duplicates(self):
+        self.tiktok_only()
+        cfg = ap.load(ap.CONFIG_FILE, {})
+        ap.save(ap.CONFIG_FILE, dict(cfg, auto_posting=True))
+        self.queue_two_episodes()
+        self.assertEqual(ap.fill_schedule(), ap.SCHEDULE_AHEAD)
+        self.assertEqual(ap.fill_schedule(), 0)   # already enough ahead: nothing more, nothing twice
+        posts = sorted(ap.load(ap.LEDGER_FILE, {})["posts"], key=lambda p: p["scheduled_at"])
+        self.assertEqual(len({p["external_id"] for p in posts}), len(posts))
+        # the other episode's clip is mixed in instead of three from the same episode in a row
+        self.assertIn("OTHERVIDEO1", [p["episode"] for p in posts[:2]])
+        times = [dt.datetime.fromisoformat(p["scheduled_at"]) for p in posts]
+        self.assertTrue(all(t.hour in ap.POST_HOURS for t in times))
+        self.assertTrue(all((b - a) >= dt.timedelta(hours=2) for a, b in zip(times, times[1:])))
+
+    def test_deleting_a_clip_file_vetoes_it(self):
+        self.tiktok_only()
+        self.queue_two_episodes()
+        item = ap.load(ap.QUEUE_FILE, {})["clips"][0]
+        (Path(item["ep_dir"]) / item["clip"]["file"]).unlink()
+        self.assertIsNone(ap.schedule_from_queue(item, ap.now() + dt.timedelta(hours=1)))
+        self.assertEqual(ap.load(ap.QUEUE_FILE, {})["clips"][0]["status"], "removed")
+        self.assertEqual(FakePostForMe.posts, {})
 
     def test_bad_key_stops(self):
         os.environ["PURSUIT_POSTFORME_KEY"] = "wrong"
@@ -236,19 +337,20 @@ class AutopilotTests(unittest.TestCase):
         self.assertTrue(any("tiktok" in p for p in problems))
 
     def test_first_run_sets_baseline_then_processes_only_new(self):
+        ap.save(ap.CONFIG_FILE, {"accounts": ACCOUNTS, "expected_usernames": EXPECTED, "backlog": False})
         calls = []
         args = type("A", (), {"dry_run": False, "no_claude_qc": False})
         old = [{"id": "OLDEPISODE1", "title": "Old", "url": "u", "duration": 999}]
         new = [{"id": "NEWEPISODE1", "title": "New", "url": "u", "duration": 999}]
         with patch("autopilot.latest_episodes", return_value=old), patch(
-                "autopilot.process_episode", side_effect=lambda ep, state, dry_run, use_claude=True: calls.append(ep["id"]) or "ok"):
+                "autopilot.process_episode", side_effect=lambda ep, state, dry_run, use_claude=True, **kw: calls.append(ep["id"]) or "ok"):
             ap.cmd_run(args)
             self.assertEqual(calls, [])
             self.assertEqual(ap.load(ap.STATE_FILE, {})["last_processed_video_id"], "OLDEPISODE1")
             ap.cmd_run(args)
             self.assertEqual(calls, [])
         with patch("autopilot.latest_episodes", return_value=new), patch(
-                "autopilot.process_episode", side_effect=lambda ep, state, dry_run, use_claude=True: calls.append(ep["id"]) or "ok"):
+                "autopilot.process_episode", side_effect=lambda ep, state, dry_run, use_claude=True, **kw: calls.append(ep["id"]) or "ok"):
             ap.cmd_run(args)
             self.assertEqual(calls, ["NEWEPISODE1"])
 
