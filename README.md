@@ -2,7 +2,7 @@
 
 An automated podcast growth system built for **PURSUIT**.
 
-The goal is simple: turn long-form podcast episodes into polished short-form discovery content with as little weekly work as possible.
+The goal is simple: run a hands-off podcast-to-short-form engine. A Mac works through PURSUIT's existing YouTube catalog, detects new episodes, finds strong standalone moments with Claude, renders and quality-checks vertical clips, and automatically publishes approved content on a recurring schedule.
 
 ```text
 YouTube podcast episode
@@ -19,6 +19,37 @@ YouTube podcast episode
 This is a small, local macOS command-line tool. It is not a web app and it does not create social accounts, bypass OAuth, manage comments, or modify existing channel content.
 
 ## What It Does
+
+### Built end-to-end automation
+
+The current local build goes beyond one-off clip generation. It can run as a scheduled, hands-off content engine:
+
+- Works through PURSUIT's existing YouTube back catalog automatically.
+- Checks for new PURSUIT episodes six times per day and gives fresh episodes priority.
+- Uses Claude to select promising, standalone short-form moments.
+- Renders 9:16 clips with captions, framing, and normalized audio.
+- Runs technical, editorial, caption, framing, and audio quality control; weak candidates are rejected rather than posted just to fill a slot.
+- Maintains an internal buffer of approved clips without requiring the user to manage the queue.
+- Processes another back-catalog episode roughly every three hours when the buffer needs content, and pauses backlog work when about a week's worth of clips is ready.
+- Supports up to three automated posting slots per day (10:00, 14:00, and 19:00 local time). A slot is skipped when no clip passes QC.
+- Tracks processed episodes, used time ranges, queued clips, and posts to prevent duplicate content.
+- Uses persistent state, retries, locking, and reconciliation so interruptions, restarts, and ambiguous API failures do not blindly create duplicate posts.
+- Keeps unattended posting OFF until a controlled real post has been confirmed live.
+- Currently supports a verified/pinned TikTok destination; the posting model is designed to extend the same generated clips to connected Instagram Reels and YouTube Shorts accounts.
+
+In short:
+
+```text
+PURSUIT old + new YouTube episodes
+        -> scheduled discovery
+        -> transcription
+        -> Claude selects strong unused moments
+        -> vertical render + captions + audio/framing
+        -> quality control
+        -> internal approved buffer
+        -> automatic scheduled publishing
+        -> repeat without daily clip management
+```
 
 - Accepts a YouTube episode URL or detects a new PURSUIT upload.
 - Downloads the source with `yt-dlp`.
@@ -118,10 +149,12 @@ Rehearse a complete episode without creating any posts or changing production st
 For the first controlled live test:
 
 ```bash
-./autopilot live-test "YOUTUBE_URL"
+./autopilot live-test
 ```
 
-The command performs the full pipeline and QC, chooses exactly one passing clip, shows the destination accounts and schedule, and opens the MP4 for review. Nothing is scheduled unless you type `POST ONE CLIP` exactly in an interactive Terminal.
+The automated queue supplies the candidate; a URL can still be processed manually when needed.
+
+The command chooses exactly one passing clip, shows the destination account and schedule, and opens the MP4 for review. Nothing is scheduled unless you type `POST ONE CLIP` exactly in an interactive Terminal. Unattended posting remains locked until a real live-test post is confirmed as posted; after that, `./autopilot auto-post on` enables the hands-off schedule.
 
 ## Autopilot Behavior
 
@@ -131,12 +164,15 @@ Install the LaunchAgent after setup and testing:
 ./install_autopilot.sh
 ```
 
-It checks the PURSUIT YouTube channel at 7:15, 10:15, 13:15, 16:15, 19:15, and 22:15 local time. The first run records the newest episode as its baseline; later uploads are processed automatically. Passing clips are scheduled strongest-first, one per day at 5:00 PM, to all three configured platforms.
+It checks the PURSUIT YouTube channel six times per day. New episodes jump ahead of the older catalog. When the approved buffer needs content, the scheduled worker can process another back-catalog episode roughly every three hours; it pauses backlog processing when about a week's worth of approved clips is already waiting.
+
+After the controlled live-post gate has succeeded and unattended posting is explicitly enabled, the current target is up to three posting slots per day at **10:00, 14:00, and 19:00 local time**. A slot is skipped rather than publishing a clip that did not pass quality control. The queue is an internal reliability mechanism and does not require daily manual management.
 
 ```bash
 ./autopilot status
 ./autopilot pause
 ./autopilot resume
+./autopilot auto-post on
 ./autopilot process "YOUTUBE_URL"
 ./install_autopilot.sh --remove
 ```
