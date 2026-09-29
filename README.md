@@ -12,15 +12,18 @@ YouTube podcast episode
         -> FFmpeg creates 9:16 clips
         -> captions and audio normalization
         -> technical and visual quality control
-        -> Post for Me
-        -> TikTok + Instagram Reels + YouTube Shorts
+        -> approved buffer (never the same moment twice)
+        -> Post for Me, ~3 per day
+        -> verified TikTok @pursuitthepod (Instagram Reels / YouTube Shorts once connected)
 ```
+
+Old episodes keep it supplied; new uploads are detected automatically and get priority.
 
 This is a small, local macOS command-line tool. It is not a web app and it does not create social accounts, bypass OAuth, manage comments, or modify existing channel content.
 
 ## What It Does
 
-- Accepts a YouTube episode URL or detects a new PURSUIT upload.
+- Works through the PURSUIT back catalog and detects new uploads automatically.
 - Downloads the source with `yt-dlp`.
 - Transcribes locally with `mlx-whisper`, including word-level timestamps.
 - Asks the Claude Code CLI to find interesting, standalone moments with fast openings and complete endings.
@@ -99,65 +102,63 @@ The API key is entered without echo and stored in macOS Keychain, not in this re
 
 The optional `PURSUIT_POSTFORME_KEY` environment variable is supported for development, but Keychain is the recommended local setup. Never commit a real `.env` file.
 
-## Safe Testing
+## Going Live (once)
 
-First render an episode manually so a test clip exists. Then verify all three connections without publishing:
+1. Verify the account without publishing (uploads a clip, creates a Post for Me draft, deletes it):
+
+   ```bash
+   ./autopilot test-post
+   ```
+
+2. One controlled real post. It picks the best approved clip, shows the clip, caption, destination and time, opens the MP4, and schedules it 20 minutes out only if you type `POST ONE CLIP`:
+
+   ```bash
+   ./autopilot live-test
+   ```
+
+3. When the post appears on TikTok, turn on the hands-off system:
+
+   ```bash
+   ./autopilot auto-post on
+   ```
+
+   It first checks with Post for Me that the live test actually published, and refuses otherwise.
+
+## What Runs Automatically
+
+A LaunchAgent (`./install_autopilot.sh`, already installed) runs at 7:15, 10:15, 13:15, 16:15, 19:15 and 22:15. It starts again after restarts and catches up once after sleep. Each run does these steps independently, so one failing step never blocks the others:
+
+1. **Checks earlier posts.** It asks Post for Me what happened and records the links. Failures trigger a Mac notification.
+2. **Keeps 3 posts scheduled ahead** (auto-posting only) in the 10:00, 14:00 and 19:00 slots, so about 3 TikToks a day. The posts sit on Post for Me's servers, so they go out even if the Mac is asleep or offline.
+3. **New episodes:** detects a new PURSUIT upload and turns its good moments into approved clips. Fresh clips get priority.
+4. **Back catalog:** processes one old episode per run (newest first) whenever fewer than 21 approved clips (about a week) are waiting.
+5. **Tops the schedule up again** with anything new.
+
+For every clip:
+
+- **Quality control:** a clip only becomes "approved" if it passes the full quality control (Claude's score ≥ 70 and standalone ≥ 7, technical checks, and Claude's visual check of the finished video).
+- **Choosing what to post:** the best approved clip goes first. The same episode or topic is avoided back to back.
+- **When nothing good is left:** if nothing approved is available, the slot is skipped. Nothing weak is ever posted to fill it.
+- **Never twice:** a moment is never posted twice. Each post records the episode and time range, and anything overlapping an earlier post is dropped.
+- **Removing a clip:** deleting a clip's folder removes it before it's posted.
+
+**Resilience:**
+- **Resuming work:** interrupted downloads, transcripts and renders resume from cache.
+- **Outages:** a Claude or internet outage skips processing for that run without using up an episode's retry attempts. Episodes that fail 3 times get retried after 7 days.
+- **Unclear replies:** an ambiguous Post for Me response is recorded and looked up by its unique ID next run, never re-posted blindly.
+
+**Adding Instagram/YouTube later:** connect the account in Post for Me, add its expected handle to `expected_usernames` in `~/Library/Application Support/PURSUIT_AUTOPILOT/config.json`, and run `./autopilot setup`. The same clips then go to every verified account.
 
 ```bash
-./autopilot test-post
-```
-
-This uploads one existing clip, creates a Post for Me **system draft**, validates it, and deletes the draft. It does not publish the draft.
-
-Rehearse a complete episode without creating any posts or changing production state:
-
-```bash
-./autopilot process "YOUTUBE_URL" --dry-run
-```
-
-Build the approved queue from old episodes (renders + QC only, never posts):
-
-```bash
-./autopilot backlog --limit 5
-```
-
-For the first controlled live test:
-
-```bash
-./autopilot live-test                 # best clip in the queue, goes live in 20 minutes
-./autopilot live-test --clip SOME-NAME --minutes 30
-```
-
-It verifies the API key and account handles, shows the clip, caption, destinations and time, and opens the MP4. Nothing is scheduled unless you type `POST ONE CLIP` exactly in an interactive Terminal.
-
-## Autopilot Behavior
-
-Install the LaunchAgent after setup and testing:
-
-```bash
-./install_autopilot.sh
-```
-
-It runs at 7:15, 10:15, 13:15, 16:15, 19:15, and 22:15 local time. Each run: checks the posts that went out, queues clips from any new episode, processes one old episode into the queue, and, **only if auto-posting is on**, keeps 3 approved clips scheduled ahead at 10:00, 14:00 and 19:00. New-episode clips get priority, and the same episode/topic isn't posted back to back. Deleting a clip's folder removes it from the queue.
-
-Auto-posting stays off until one live post has been confirmed:
-
-```bash
-./autopilot auto-post on      # refuses until a live test shows as [posted]
-./autopilot auto-post off
-```
-
-```bash
-./autopilot status
-./autopilot pause
-./autopilot resume
-./autopilot process "YOUTUBE_URL"
+./autopilot status            # what's scheduled / posted / waiting (also ~/Desktop/PURSUIT_CLIPS/AUTOPILOT_STATUS.txt)
+./autopilot pause | resume    # stop/start new work (already-scheduled posts still go out)
+./autopilot auto-post off     # stop scheduling new posts
 ./install_autopilot.sh --remove
 ```
 
 Runtime data is stored outside the repository:
 
-- State and account IDs: `~/Library/Application Support/PURSUIT_AUTOPILOT/`
+- State, approved queue, post ledger, pinned account IDs: `~/Library/Application Support/PURSUIT_AUTOPILOT/`
 - API key: macOS Keychain
 - Logs: `~/Library/Logs/pursuit-autopilot.log`
 - Clips/status: `~/Desktop/PURSUIT_CLIPS/`

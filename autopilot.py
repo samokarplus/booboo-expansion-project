@@ -66,6 +66,8 @@ QUEUE_FILE = STATE_DIR / "queue.json"      # approved clips waiting to be posted
 POST_HOURS = [10, 14, 19]      # queue posting slots (local time) once auto-posting is enabled
 SCHEDULE_AHEAD = 3             # keep this many queued clips scheduled in advance (covers the Mac sleeping)
 BACKLOG_PER_RUN = 1            # old episodes processed per scheduled run
+BACKLOG_TARGET = 21            # stop working on the back catalog while a week of approved clips is waiting
+RETRY_AFTER_DAYS = 7           # episodes that failed MAX_ATTEMPTS times get another chance after this
 
 # --- policy ---------------------------------------------------------------------------
 TZ = ZoneInfo(os.environ.get("PURSUIT_TZ", "America/Denver"))
@@ -129,6 +131,43 @@ def save(path, data):
 
 class Stop(Exception):
     """Fail-closed stop with a human message."""
+
+
+class Transient(Stop):
+    """Temporarily unavailable (e.g. Claude or the internet). Nothing was attempted; try again next run."""
+
+
+_claude_ok = None
+
+
+def claude_available():
+    """One cheap check per run, so an outage doesn't use up an episode's retry attempts."""
+    global _claude_ok
+    if _claude_ok is None:
+        try:
+            if not pc.find_claude():
+                raise pc.Fail("Claude Code CLI not found")
+            pc.ask_claude(pc.find_claude(), "Reply with just the word OK.", timeout=90)
+            _claude_ok = True
+        except (pc.Fail, subprocess.TimeoutExpired, OSError) as e:
+            log(f"Claude unavailable this run: {str(e)[:150]}")
+            _claude_ok = False
+    return _claude_ok
+
+
+def retry_due(rec):
+    """Give episodes that failed repeatedly another chance after RETRY_AFTER_DAYS (reset their attempt count)."""
+    if rec.get("attempts", 0) < MAX_ATTEMPTS:
+        return True
+    try:
+        last = dt.datetime.fromisoformat(rec.get("last_attempt"))
+    except (TypeError, ValueError):
+        return False
+    if now() - last > dt.timedelta(days=RETRY_AFTER_DAYS):
+        rec["attempts"] = 0
+        rec.pop("status", None) if rec.get("status") == "gave_up" else None
+        return True
+    return False
 
 
 # ------------------------------------------------------------------------------ Post for Me API
@@ -633,6 +672,7 @@ def schedule_clips(passed, summary, dry_run, slots=None):
                                 "scheduled_at": when.isoformat(), "clip": clip["folder"], "episode": meta["id"],
                                 "episode_title": meta["title"], "youtube_title": clip["analysis"]["youtube_title"],
                                 "category": clip["analysis"].get("category", ""), "platforms": platforms,
+                                "start_sec": clip.get("start_sec"), "end_sec": clip.get("end_sec"),
                                 "file": str(mp4), "results": {}})
         save(LEDGER_FILE, ledger)
         log(f"  scheduled {clip['folder']} for {when:%a %b %d %H:%M} (post {post['id']})")
@@ -737,6 +777,8 @@ def render_and_check(ep, rec, use_claude=True):
 
 def process_episode(ep, state, dry_run, use_claude=True, fresh=True):
     """Render, check and add the good clips to the approved queue. Posting happens from the queue (fill_schedule)."""
+    if use_claude and not claude_available():
+        raise Transient("Claude is unavailable right now; will process later (no attempt used).")
     rec = state["episodes"].setdefault(ep["id"], {"title": ep["title"], "attempts": 0})
     rec["attempts"] += 1
     rec["last_attempt"] = now().isoformat()
@@ -829,6 +871,16 @@ def schedule_from_queue(item, when):
         save(QUEUE_FILE, queue)
         log(f"  {item['clip']['folder']} was deleted from disk; dropping it from the queue.")
         return None
+    s0, e0 = float(item["clip"].get("start_sec", 0)), float(item["clip"].get("end_sec", 0))
+    for p in load(LEDGER_FILE, {"posts": []})["posts"]:
+        if p.get("episode") == item["episode"] and p.get("end_sec") is not None and p["status"] != "not_created":
+            if min(e0, float(p["end_sec"])) - max(s0, float(p["start_sec"])) > 0:
+                for q in queue["clips"]:
+                    if q["external_id"] == item["external_id"]:
+                        q["status"] = "duplicate"
+                save(QUEUE_FILE, queue)
+                log(f"  {item['clip']['folder']} overlaps a moment already posted ({p['clip']}); skipping it.")
+                return None
     summary = {"ep_dir": item["ep_dir"], "meta": item["meta"]}
     done = schedule_clips([dict(item["clip"], analysis=item["analysis"])], summary, dry_run=False, slots=[when])
     if done != [item["external_id"]]:
@@ -852,27 +904,37 @@ def fill_schedule():
     if need <= 0:
         return 0
     configured_accounts(cfg)
-    picks = pick_next(load(QUEUE_FILE, {"clips": []}), ledger, need)
-    count = 0
-    for item in picks:
+    count, tried = 0, set()
+    while count < need:
+        picks = [q for q in pick_next(load(QUEUE_FILE, {"clips": []}), load(LEDGER_FILE, {"posts": []}), need)
+                 if q["external_id"] not in tried][:1]
+        if not picks:
+            log("No approved clip available for the next slot; skipping it rather than posting something weak.")
+            break
+        tried.add(picks[0]["external_id"])
         when = queue_slots(load(LEDGER_FILE, {"posts": []}), 1)[0]
-        if schedule_from_queue(item, when):
+        if schedule_from_queue(picks[0], when):
             count += 1
-    if not picks:
-        log("Approved queue is empty.")
     return count
 
 
 def backlog_step(state, limit, use_claude=True):
     """Process up to `limit` old episodes that haven't been handled yet (newest first). Queue only, never posts."""
+    waiting = sum(1 for q in load(QUEUE_FILE, {"clips": []})["clips"] if q["status"] == "queued")
+    if waiting >= BACKLOG_TARGET:
+        log(f"{waiting} approved clips waiting; back catalog can rest.")
+        return [], None
     eps = latest_episodes(limit=300)
     todo = [e for e in eps if state["episodes"].get(e["id"], {}).get("status") not in
-            ("queued", "done", "rejected", "gave_up", "live_test")
-            and state["episodes"].get(e["id"], {}).get("attempts", 0) < MAX_ATTEMPTS]
+            ("queued", "done", "rejected", "live_test")
+            and retry_due(state["episodes"].get(e["id"], {}))]
     msgs = []
     for ep in todo[:limit]:
         try:
             msgs.append(process_episode(ep, state, dry_run=False, use_claude=use_claude, fresh=False))
+        except Transient as e:
+            msgs.append(str(e))
+            break
         except Stop as e:
             msgs.append(str(e).splitlines()[0])
             log(f"Back catalog: {e}")
@@ -930,24 +992,36 @@ def cmd_run(args, only_url=None):
     state.setdefault("episodes", {})
     extra = ""
     try:
-        if not args.dry_run and load(LEDGER_FILE, {"posts": []})["posts"]:
-            reconcile()
         if only_url:
+            if not args.dry_run and load(LEDGER_FILE, {"posts": []})["posts"]:
+                reconcile()
             vid = re.search(r"(?:v=|youtu\.be/|shorts/)([\w-]{11})", only_url)
             if not vid:
                 raise Stop("That doesn't look like a YouTube video URL.")
             ep = {"id": vid.group(1), "title": vid.group(1), "url": only_url}
             extra = process_episode(ep, state, args.dry_run, not args.no_claude_qc, fresh=False)
             return
-        extra = check_new_episode(args, state) or ""
-        if not args.dry_run:
-            if load(CONFIG_FILE, {}).get("backlog", True):
-                msgs, left = backlog_step(state, BACKLOG_PER_RUN, not args.no_claude_qc)
-                if msgs:
-                    extra = (extra + "\n" if extra else "") + "Back catalog: " + " | ".join(msgs) + f" ({left} episodes left)"
-            n = fill_schedule()
-            if n:
-                extra = (extra + "\n" if extra else "") + f"Scheduled {n} clip(s) from the approved queue."
+        live = not args.dry_run
+        steps = [("posts", lambda: (reconcile(), None)[1] if live and load(LEDGER_FILE, {"posts": []})["posts"] else None),
+                 ("scheduling", lambda: schedule_msg(fill_schedule()) if live else None),
+                 ("new episode", lambda: check_new_episode(args, state)),
+                 ("back catalog", lambda: backlog_msg(*backlog_step(state, BACKLOG_PER_RUN, not args.no_claude_qc))
+                  if live and load(CONFIG_FILE, {}).get("backlog", True) else None),
+                 ("scheduling", lambda: schedule_msg(fill_schedule()) if live else None)]
+        lines = []
+        for name, step in steps:
+            try:
+                msg = step()
+                if msg:
+                    lines.append(msg)
+            except Transient as e:
+                lines.append(f"{name}: waiting ({e})")
+                log(lines[-1])
+            except (Stop, Ambiguous) as e:
+                lines.append(f"{name}: STOPPED (nothing questionable was posted): {e}")
+                notify("PURSUIT autopilot stopped", f"{name}: {str(e).splitlines()[0]}")
+                log(lines[-1])
+        extra = "\n".join(lines)
     except Stop as e:
         extra = f"STOPPED (nothing questionable was posted): {e}"
         notify("PURSUIT autopilot stopped", str(e).splitlines()[0])
@@ -964,6 +1038,16 @@ def cmd_run(args, only_url=None):
     finally:
         write_status(extra)
         lock.close()
+
+
+def schedule_msg(n):
+    return f"Scheduled {n} clip(s) from the approved queue." if n else None
+
+
+def backlog_msg(msgs, left):
+    if not msgs:
+        return None
+    return "Back catalog: " + " | ".join(msgs) + (f" ({left} episodes left)" if left is not None else "")
 
 
 def check_new_episode(args, state):
@@ -986,7 +1070,7 @@ def check_new_episode(args, state):
     if rec.get("status") in ("done", "gave_up", "rejected", "queued", "live_test"):
         log(f"Newest episode already handled ({rec['status']}).")
         return None
-    if rec.get("attempts", 0) >= MAX_ATTEMPTS:
+    if not retry_due(rec):
         rec["status"] = "gave_up"
         save(STATE_FILE, state)
         notify("PURSUIT autopilot needs you", f"Gave up on '{newest['title']}' after {MAX_ATTEMPTS} tries. See {STATUS_FILE}")
@@ -1137,10 +1221,16 @@ def cmd_live_test(args):
         raise Stop("The one-clip live test requires an interactive Terminal.")
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     with open(LOCK_FILE, "w") as lock:
-        try:
-            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError:
-            raise Stop("Another autopilot run is in progress. Try again after it finishes.")
+        for waited in range(45 * 6):          # background processing holds the lock for ~10-15 min at a time
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                if waited == 0:
+                    print("Background processing is running; waiting for it to finish (usually < 15 min)...")
+                time.sleep(10)
+        else:
+            raise Stop("Background processing is still running after 45 minutes. Try again later.")
         cfg = load(CONFIG_FILE, {})
         live = configured_accounts(cfg)          # API key works + every destination is the verified handle
         ledger = load(LEDGER_FILE, {"posts": []})
@@ -1191,13 +1281,23 @@ def cmd_auto_post(args):
         save(CONFIG_FILE, cfg)
         print("Auto-posting OFF. Clips keep going into the approved queue; nothing new gets scheduled.")
         return
+    if load(LEDGER_FILE, {"posts": []})["posts"]:
+        reconcile()                      # pick up the live test's result if it just went out
     ledger = load(LEDGER_FILE, {"posts": []})
     if not any(p["status"] == "posted" for p in ledger["posts"]):
         raise Stop("No post has been confirmed live yet. Do the one-clip live test first and let it go out "
                    "(./autopilot status shows it as [posted]).")
     configured_accounts(cfg)
     cfg["auto_posting"] = True
+    cfg.pop("backlog", None)             # back catalog on (default)
     save(CONFIG_FILE, cfg)
+    PAUSE_FILE.unlink(missing_ok=True)
+    loaded = subprocess.run(["launchctl", "print", f"gui/{os.getuid()}/com.pursuit.autopilot"],
+                            capture_output=True).returncode == 0
+    if not loaded:
+        subprocess.run([str(HERE / "install_autopilot.sh")], check=False)
+    n = fill_schedule()
+    print(f"Scheduled {n} clip(s) now.")
     print(f"Auto-posting ON: approved clips go out at {', '.join(f'{h}:00' for h in POST_HOURS)} "
           f"(keeping {SCHEDULE_AHEAD} scheduled ahead).")
 

@@ -401,6 +401,78 @@ class AutopilotTests(unittest.TestCase):
             ap.schedule_clips(self.clips[:1], self.summary, dry_run=False)
         self.assertEqual(FakePostForMe.posts, {})
 
+    # ---- hands-off operation ---------------------------------------------------------------------
+    def auto_on(self):
+        self.tiktok_only()
+        ap.save(ap.CONFIG_FILE, dict(ap.load(ap.CONFIG_FILE, {}), auto_posting=True))
+
+    def test_same_moment_is_never_posted_twice_even_under_another_name(self):
+        self.auto_on()
+        clip = dict(self.clips[0], start_sec=100.0, end_sec=130.0)
+        ap.add_to_queue([clip], self.summary, fresh=False)
+        ap.fill_schedule()
+        # the episode is later re-analysed: same moment (overlapping range), different folder name
+        again = dict(clip, folder="07_same-moment", file="01_clip-0/01_clip-0.mp4", start_sec=110.0, end_sec=140.0)
+        ap.add_to_queue([again], self.summary, fresh=True)
+        ap.fill_schedule()
+        self.assertEqual(len(FakePostForMe.posts), 1)
+        statuses = {q["clip"]["folder"]: q["status"] for q in ap.load(ap.QUEUE_FILE, {})["clips"]}
+        self.assertEqual(statuses["07_same-moment"], "duplicate")
+
+    def test_empty_buffer_skips_the_slot_instead_of_posting_anything(self):
+        self.auto_on()
+        self.assertEqual(ap.fill_schedule(), 0)
+        self.assertEqual(FakePostForMe.posts, {})
+
+    def test_a_failing_step_does_not_block_posting_from_the_buffer(self):
+        self.auto_on()
+        self.queue_two_episodes()
+        args = type("A", (), {"dry_run": False, "no_claude_qc": False})
+        with patch("autopilot.latest_episodes", side_effect=ap.Stop("YouTube unreachable")):
+            ap.cmd_run(args)
+        self.assertEqual(len(FakePostForMe.posts), ap.SCHEDULE_AHEAD)
+        self.assertIn("STOPPED", ap.STATUS_FILE.read_text())
+
+    def test_claude_outage_does_not_use_up_attempts(self):
+        state = {"episodes": {}}
+        with patch("autopilot.claude_available", return_value=False):
+            with self.assertRaises(ap.Transient):
+                ap.process_episode({"id": "EPISODE0001", "title": "t", "url": "u"}, state, dry_run=False)
+        self.assertEqual(state["episodes"], {})
+
+    def test_failed_episodes_get_another_chance_after_a_week(self):
+        old = {"attempts": ap.MAX_ATTEMPTS, "last_attempt": (ap.now() - dt.timedelta(days=8)).isoformat()}
+        recent = {"attempts": ap.MAX_ATTEMPTS, "last_attempt": ap.now().isoformat()}
+        self.assertTrue(ap.retry_due(old))
+        self.assertEqual(old["attempts"], 0)
+        self.assertFalse(ap.retry_due(recent))
+
+    def test_back_catalog_rests_while_a_week_of_clips_is_waiting(self):
+        queue = {"clips": [{"external_id": f"x{i}", "status": "queued"} for i in range(ap.BACKLOG_TARGET)]}
+        ap.save(ap.QUEUE_FILE, queue)
+        with patch("autopilot.latest_episodes", side_effect=AssertionError("should not look")):
+            self.assertEqual(ap.backlog_step({"episodes": {}}, 1), ([], None))
+
+    def test_one_command_enables_everything_only_after_a_real_post(self):
+        self.tiktok_only()
+        self.queue_two_episodes()
+        args = type("A", (), {"state": "on"})
+        with self.assertRaises(ap.Stop):
+            ap.cmd_auto_post(args)
+        self.assertEqual(FakePostForMe.posts, {})
+        # the live test went out and TikTok reported success
+        ap.schedule_from_queue(ap.load(ap.QUEUE_FILE, {})["clips"][0], ap.now() + dt.timedelta(minutes=20))
+        ledger = ap.load(ap.LEDGER_FILE, {})
+        ledger["posts"][0]["scheduled_at"] = (ap.now() - dt.timedelta(hours=1)).isoformat()
+        ap.save(ap.LEDGER_FILE, ledger)
+        FakePostForMe.results[ledger["posts"][0]["post_id"]] = [
+            {"social_account_id": "spc_tt", "success": True, "platform_data": {"url": "https://tiktok.com/@pursuitthepod/video/1"}}]
+        with patch("autopilot.subprocess.run") as run, patch("builtins.print"):
+            run.return_value.returncode = 0          # launchd agent is installed
+            ap.cmd_auto_post(args)
+        self.assertTrue(ap.load(ap.CONFIG_FILE, {})["auto_posting"])
+        self.assertEqual(len(FakePostForMe.posts), 1 + ap.SCHEDULE_AHEAD)
+
     def test_bad_key_stops(self):
         os.environ["PURSUIT_POSTFORME_KEY"] = "wrong"
         try:
