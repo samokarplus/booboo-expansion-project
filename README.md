@@ -286,73 +286,95 @@ Useful commands:
 
 A controlled real-world Drive test and a real three-Short batch were successfully uploaded and downloaded back for integrity verification before automatic delivery was enabled. The recurring new-episode path is covered by automated tests; the first completely hands-off future episode remains the final real-world validation of that recurring path.
 
-## Spotify: Full Episodes as an Audio Podcast
+## Spotify: Automatic Full Episodes
 
-The Spotify workflow takes the **full podcast episode**, extracts its audio, and publishes an MP3 through a podcast host and RSS feed. Spotify reads that feed and makes the episode available to listeners. This is a separate destination from the short clips published through Post for Me.
+The program downloads the full YouTube episode, converts it to MP3, uploads it to Cloudflare R2, and updates a public podcast RSS feed. After Anya connects that feed to Spotify once, Spotify imports future episodes. No per-episode Spotify upload is needed. Spotify controls the import delay; `published` in this tool means the public feed has been verified, not that Spotify has finished importing it.
 
-**Current status:** the podcast module and CLI integration are implemented locally and passed automated tests. They have not yet been pushed to this repository or activated for production. This documentation update describes that local implementation; a fresh clone will not yet include the `podcast-*` commands below. A podcast host, credentials, RSS registration, and a verified live episode are still required before calling Spotify distribution operational.
+The implementation is included in this project and tested with simulated storage, HTTP responses and generated audio. It still needs the real Cloudflare account, deployment and Spotify registration before it is live.
 
-```text
-New full-length YouTube episode
-        -> program finds the episode's source media
-        -> program extracts audio and converts it to MP3
-        -> program uploads and publishes through Transistor
-        -> Transistor updates the podcast RSS feed
-        -> Spotify reads the feed and lists the episode
-```
+### What Anya Needs to Create
 
-### What the User Does Once
+1. A [Cloudflare account](https://dash.cloudflare.com/sign-up), with R2 enabled. Cloudflare may require billing details even when usage fits the free allowance. Create a **Standard** storage bucket named `pursuit-podcast`. Use a dedicated bucket, with no automatic expiry rules for podcast audio. Leave bucket public access disabled; the included Worker serves only the feed, audio and cover.
+2. In R2, create S3 credentials with **Object Read & Write** permission restricted to this bucket. Keep the Account ID, Access Key ID and Secret Access Key private. Enter the keys in the local setup prompt, not in messages or GitHub. They are saved outside the repository with owner-only file permissions.
+3. A square podcast cover image, ideally 1400-3000 pixels per side. Upload it to the bucket as `cover.jpg` or `cover.png`. Choose the show title, description, explicit-content setting and the email Anya can receive Spotify verification at. The owner email will appear in the public RSS feed.
+4. A [Spotify for Creators account](https://creators.spotify.com/) for the intended owner. For this automatic route, **submit an existing RSS show**, rather than creating a second show hosted by Spotify. If PURSUIT already exists there, check its current hosting/feed before creating another listing.
 
-1. **Create the podcast at a host.** The implemented default is [Transistor](https://transistor.fm/). Set the show name, description, author, category, explicit-content setting, cover artwork, and owner email. The host subscription is an additional cost; check its current pricing before subscribing.
-2. **Configure access on the Mac.** Supply the Transistor API key and show ID through local configuration or the environment. Keep these credentials out of GitHub. Scheduled runs must have access to the same settings; exporting variables in one Terminal session alone does not configure the macOS LaunchAgent.
-3. **Choose how source media is supplied.** By default, provide an exported episode file. Register it with `podcast-source`, or configure a source folder with filenames containing the episode's YouTube video ID. Optionally enable the existing YouTube download path with `PURSUIT_PODCAST_ALLOW_YTDLP=1` for the owner's uploads.
-4. **Initialize episode watching.** The first podcast run records the latest YouTube episode as its starting point. It does not publish that episode or backfill older episodes. Later runs handle episodes newer than that starting point, one per run, oldest first.
-5. **Check and publish a first eligible episode.** Run the dry run to check source retrieval and MP3 conversion, then run the publishing command. The dry run writes local working files and status, but does not upload or publish. Check the resulting episode and RSS feed in the host.
-6. **Connect the RSS feed to Spotify.** In [Spotify for Creators](https://creators.spotify.com/), submit the host's RSS feed as an existing podcast and complete ownership verification using the feed's owner email. Check that Spotify accepts the show and displays the first episode.
-7. **Enable recurring distribution.** Turn `podcast-auto on` after configuration and testing. The local scheduled worker needs to be installed and the Mac needs to be awake, online, and able to access the source media and credentials. The podcast step runs during live autopilot runs; the existing autopilot pause controls also apply.
+No domain purchase is needed: the included Cloudflare Worker exposes a `workers.dev` HTTPS address. Cloudflare recommends custom domains for business-critical use; a domain can be connected later. This route avoids a podcast-host subscription, but is not unlimited free hosting. R2 Standard currently includes **10 GB** and operation allowances; Workers Free includes **100,000 requests/day**. Usage above allowances can incur charges or hit limits. Set billing notifications and check usage. A one-hour episode at 160 kbps uses approximately 72 MB before small overhead.
 
-### What the Program Does Automatically
+Sources: [R2 pricing](https://developers.cloudflare.com/r2/pricing/), [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [workers.dev routing](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/).
 
-| Step | Program behavior |
-| --- | --- |
-| Discover | Reuses autopilot's full-episode detection and selects an eligible upload newer than the initial starting point. |
-| Find media | Looks for the registered export or a matching file in the source folder; uses the YouTube download path only when explicitly configured. |
-| Convert | Extracts the complete audio track and creates a stereo MP3, defaulting to 160 kbps. |
-| Publish | Uploads the MP3 to Transistor, creates the episode with its title, description and YouTube link, and asks the host to publish it. |
-| Record | Saves per-episode progress and a publication ledger to avoid publishing an already recorded episode again. |
-| Report | Shows podcast progress and errors in `podcast-status` and the normal autopilot status output. |
+### Deploy the Public Feed Server Once
 
-**Transistor hosts the audio and updates the RSS feed. Spotify controls when it imports and displays the episode.** A program status of `published` confirms host/feed publication, not that Spotify has already refreshed. The program does not create the hosting account, complete Spotify ownership verification, or confirm Spotify listing availability. See [Spotify's RSS explanation](https://support.spotify.com/bd-en/creators/article/your-rss-feed/) and the [Transistor API documentation](https://developers.transistor.fm/).
-
-### What the User Does for Each New Episode
-
-Publish the full episode to YouTube as usual. With the default source-file workflow, also provide the exported media and register its YouTube video ID, or place it in the configured source folder with that ID in its filename. The program handles conversion and host publication on subsequent scheduled runs. If the optional YouTube download path is enabled and works, a separate export is not required.
-
-Check status when an episode does not appear. A `needs_source` episode requires source registration before it resumes. An `unknown` result means the host's create/publish response was unclear: inspect Transistor before attempting another publication to avoid duplicates. Reconnect expired credentials and manage hosting billing when needed.
-
-### Commands in the Local Implementation
-
-These commands become available from a fresh clone once the implementation is published to GitHub:
+On the Mac running this project, install the added Python dependency:
 
 ```bash
-# Register an exported source for a specific YouTube episode.
-./autopilot podcast-source VIDEO_ID ~/Movies/full_episode_export.mp4
+cd ~/Documents/PURSUIT_CLIPS_TOOL
+.venv/bin/pip install -r requirements.txt
+```
 
-# First run initializes watching; subsequent runs handle one newer episode.
-./autopilot podcast-run --once --dry-run
-./autopilot podcast-run --once
+Use Node.js and Cloudflare's Wrangler CLI to deploy the included server. Sign in with the Cloudflare account that owns the bucket:
 
-# Enable or disable the podcast step in scheduled live autopilot runs.
-./autopilot podcast-auto on
-./autopilot podcast-auto off
+```bash
+cd ~/Documents/PURSUIT_CLIPS_TOOL/cloudflare-podcast
+npx wrangler login
+npx wrangler deploy
+```
+
+The deployment prints an address like `https://pursuit-podcast.YOUR-SUBDOMAIN.workers.dev`. Keep that address stable. If the bucket has another name, update `bucket_name` in `wrangler.jsonc` before deploying. Only one Mac should write to this show's feed; local locking does not coordinate multiple computers.
+
+The Worker permits only GET/HEAD requests for `feed.xml`, `cover.jpg`, `cover.png` and `media/VIDEO_ID.mp3`. It streams audio, supports byte ranges for podcast players, and serves the feed without stale caching. The private bucket's write credentials are used by the local publisher, not exposed through the Worker.
+
+### Configure and Test Once
+
+Return to the project root and substitute the actual non-secret settings:
+
+```bash
+cd ~/Documents/PURSUIT_CLIPS_TOOL
+./autopilot podcast-setup \
+  --account-id YOUR_CLOUDFLARE_ACCOUNT_ID \
+  --bucket pursuit-podcast \
+  --public-url https://pursuit-podcast.YOUR-SUBDOMAIN.workers.dev \
+  --owner-email OWNER_EMAIL \
+  --artwork-url https://pursuit-podcast.YOUR-SUBDOMAIN.workers.dev/cover.jpg
+```
+
+Enter the R2 keys at the hidden prompts. Setup selects automatic R2 publication, allows downloading the owner's YouTube episodes, and leaves automation off. Settings and credentials persist for scheduled runs. Show settings can be changed in the `podcast` section of `~/Library/Application Support/PURSUIT_AUTOPILOT/config.json`: `title`, `description`, `author`, `category`, `language` and `explicit`. Defaults describe PURSUIT with Anya Postnikov; review them before the first publication.
+
+Check conversion without uploading, then publish the first full episode:
+
+```bash
+./autopilot podcast-publish latest --dry-run
+./autopilot podcast-publish latest
 ./autopilot podcast-status
 ```
 
-`--once` permits a manual podcast run while podcast automation is off; it does not override the initial starting point or select a back-catalog episode. Status and publication records live under `~/Library/Application Support/PURSUIT_AUTOPILOT/`, outside GitHub.
+These commands can take time while downloading and converting a full episode. The dry run creates local MP3/status files but does not upload. You can use a specific YouTube URL in place of `latest`, including an older episode. If downloading fails, provide the original export with `--source /path/to/episode.mp4`.
 
-### Optional Self-Hosted Feed
+The publisher uploads the audio first, verifies public byte-range access, and then uploads the feed. Stable video-ID filenames and RSS GUIDs make retries idempotent. It reads the remote feed before each update to preserve existing episodes even after local state is lost. Upload/verification failures do not record successful publication. It refuses to overwrite a feed with unrecognized episode GUIDs.
 
-The local implementation also supports `PURSUIT_PODCAST_MODE=self_hosted`. In that mode the program copies MP3 files into a local public folder and generates `feed.xml`. **The user must provide the HTTPS hosting**, public media/feed URLs, artwork URL, and owner email, and keep the feed and audio reachable. Generating local files does not deploy them to a web server. Spotify registration and verification still happen manually, once, against the public RSS URL.
+### Anya Connects Spotify Once
+
+1. Open the printed feed URL, ending in `/feed.xml`, and verify it is publicly readable. Open the cover URL and test the MP3 from the feed. Check the show's details and owner email; validate the RSS with a podcast-feed validator.
+2. In Spotify for Creators, add/claim an existing show and enter that RSS URL. Complete the verification sent to the owner email.
+3. Confirm the first episode appears on Spotify. [Spotify's ownership instructions](https://support.spotify.com/us/creators/article/claiming-your-podcast-on-spotify-for-creators/).
+4. Start watching for future uploads, then enable recurring publication:
+
+   ```bash
+   ./autopilot podcast-run --once --dry-run
+   ./autopilot podcast-auto on
+   ```
+
+The first watching run records the current latest YouTube episode as its starting point. Older episodes are not automatically backfilled; use `podcast-publish URL` for selected older episodes. Later scheduled live autopilot runs publish newer full-length episodes, oldest first, one per run.
+
+### Thereafter
+
+**Anya:** publish the full episode to YouTube as usual. Maintain the Cloudflare/Spotify accounts and respond if credentials or downloads fail. There is no routine Spotify upload step.
+
+**Program:** detect the new episode, retrieve media, convert MP3, upload audio, update/verify RSS and record status. The Mac must be awake and online; existing autopilot pause controls apply. Hosting remains available when the Mac is off, but new episodes cannot be processed until it runs again.
+
+**Spotify:** import the submitted RSS feed on its own schedule. The program does not control or verify that import timing.
+
+Use `./autopilot podcast-status` for errors and `./autopilot podcast-auto off` to stop future publication. Already hosted audio and the feed stay online; this command does not remove existing episodes.
 
 ## Safety
 

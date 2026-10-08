@@ -38,7 +38,7 @@ HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE))
 import pursuit_clips as pc  # noqa: E402  (reuse probe/ffmpeg helpers and the Claude CLI wrapper)
 
-CHANNEL_URL = "https://www.youtube.com/@PursuitThePod/videos"   # /videos = long-form only, no Shorts
+CHANNEL_URL = "https://www.youtube.com/@AnyaPostnikov/videos"   # /videos = long-form only, no Shorts
 OUT_DIR = Path(os.environ.get("PURSUIT_OUT", pc.DEFAULT_OUT))    # env overrides are for testing
 STATE_DIR = Path(os.environ.get("PURSUIT_STATE_DIR", Path.home() / "Library" / "Application Support" / "PURSUIT_AUTOPILOT"))
 STATE_FILE = STATE_DIR / "state.json"      # episodes seen / processed
@@ -672,6 +672,8 @@ def write_status(extra=""):
         links = " ".join(f"{k}:{v.get('url') or 'FAILED'}" for k, v in (p.get("results") or {}).items())
         lines.append(f"  [{p['status']}] {p['clip']}  {links}")
     lines += ["", f"Full log: {LOG_FILE}"]
+    import podcast_distribution
+    podcast_distribution.write_status(lines)
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     STATUS_FILE.write_text("\n".join(lines) + "\n")
 
@@ -746,6 +748,14 @@ def cmd_run(args, only_url=None):
         extra = f"STOPPED on an unexpected error: {e!r}"
         notify("PURSUIT autopilot error", repr(e)[:200])
     finally:
+        if not args.dry_run and not only_url:
+            try:
+                import podcast_distribution
+                podcast_message = podcast_distribution.run(type("Args", (), {"dry_run": False, "once": False})())
+                extra += "\n" + podcast_message
+            except Exception as e:
+                log(f"Podcast distribution: {e}")
+                extra += f"\nPodcast distribution: {e}"
         write_status(extra)
         lock.close()
 
@@ -927,10 +937,14 @@ def main():
     sub.add_parser("test-post")
     live = sub.add_parser("live-test", help="interactively schedule exactly one checked clip")
     live.add_argument("url")
+    import podcast_distribution as pd
+    pd.add_cli(sub)
     args = ap.parse_args()
     try:
         if args.cmd == "run":
             cmd_run(args)
+        elif args.cmd.startswith("podcast-"):
+            pd.dispatch(args)
         elif args.cmd == "process":
             cmd_run(args, only_url=args.url)
         elif args.cmd == "setup":
@@ -951,7 +965,7 @@ def main():
             PAUSE_FILE.unlink(missing_ok=True)
             write_status()
             print("Resumed.")
-    except (Stop, Ambiguous) as e:
+    except (Stop, Ambiguous, pc.Fail) as e:
         sys.exit(f"ERROR: {e}")
 
 
