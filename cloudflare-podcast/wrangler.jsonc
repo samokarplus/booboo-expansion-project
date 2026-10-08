@@ -1,0 +1,9 @@
+{
+  "name": "pursuit-podcast",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-08",
+  "workers_dev": true,
+  "r2_buckets": [
+    { "binding": "PODCAST_BUCKET", "bucket_name": "pursuit-podcast" }
+  ]
+}

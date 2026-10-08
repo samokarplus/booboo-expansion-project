@@ -29,18 +29,19 @@ PY=/opt/homebrew/opt/python@3.12/bin/python3.12
 say "Downloading the Whisper speech model (~1.6 GB, one time)"
 .venv/bin/python -c "from huggingface_hub import snapshot_download; snapshot_download('mlx-community/whisper-large-v3-turbo')"
 
-say "Checking Claude Code (used to pick the best moments; runs on your Claude subscription)"
-if ! command -v claude >/dev/null; then
-  echo "Installing Claude Code CLI..."
-  curl -fsSL https://claude.ai/install.sh | bash
-  export PATH="$HOME/.local/bin:$PATH"
+say "Checking Codex CLI (used to pick the best moments; runs on your ChatGPT Plus subscription, not the API)"
+if ! command -v codex >/dev/null; then
+  echo "Installing Codex CLI..."
+  brew install codex || npm install -g @openai/codex
 fi
-if claude -p "Reply with just OK" --output-format json 2>/dev/null | grep -q '"is_error":false'; then
-  echo "Claude Code is logged in. ✓"
-  CLAUDE_OK=1
+if codex login status 2>&1 | grep -qi "chatgpt"; then
+  echo "Codex is logged in with ChatGPT. ✓"
+  CODEX_OK=1
 else
-  CLAUDE_OK=0
+  CODEX_OK=0
 fi
+# Claude Code is now only an OPTIONAL fallback. Nothing is installed for it here.
+command -v claude >/dev/null && echo "(Claude Code found: it is NOT used unless you set PURSUIT_LLM_FALLBACK=claude.)"
 
 chmod +x pursuit-clips setup.sh
 say "Installing the 'pursuit-clips' command"
@@ -51,11 +52,11 @@ if ! grep -q '.local/bin' "$HOME/.zshrc" 2>/dev/null; then
   echo "Added ~/.local/bin to your PATH (in ~/.zshrc). Open a NEW Terminal window before using the commands."
 fi
 say "Setup complete."
-if [ "$CLAUDE_OK" = "0" ]; then
+if [ "$CODEX_OK" = "0" ]; then
   echo
-  echo "ONE MORE STEP: log in to Claude Code. In Terminal run:"
-  echo "    claude"
-  echo "choose 'Claude account with subscription', finish the login in your browser, then type /exit."
+  echo "ONE MORE STEP: log in to Codex. In Terminal run:"
+  echo "    codex login"
+  echo "choose 'Sign in with ChatGPT' (NOT an API key), finish the login in your browser."
 fi
 echo
 echo "Then make clips with:"

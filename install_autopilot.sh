@@ -23,7 +23,7 @@ cat <<XML
   <key>ProgramArguments</key>
   <array><string>$DIR/.venv/bin/python</string><string>$DIR/autopilot.py</string><string>run</string></array>
   <key>EnvironmentVariables</key>
-  <dict><key>PATH</key><string>/opt/homebrew/bin:$HOME/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
+  <dict><key>PATH</key><string>/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$HOME/.npm-global/bin:/usr/bin:/bin:/usr/sbin:/sbin</string></dict>
   <key>StartCalendarInterval</key>
   <array>
 XML

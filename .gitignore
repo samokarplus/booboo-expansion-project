@@ -47,3 +47,12 @@ PURSUIT_CLIPS/
 .idea/
 .vscode/
 *~
+
+# Google Drive OAuth (kept in ~/Library/Application Support, never in the repo)
+client_secret*.json
+google_client.json
+google_token.json
+token.json
+drive_state.json
+staging/
+.wrangler/

@@ -6,7 +6,7 @@
     ./pursuit-clips ~/Desktop/episode.mp4
 
 Pipeline: download (yt-dlp) -> transcribe (mlx-whisper, word timings) ->
-pick moments (Claude Code CLI) -> cut, reframe, caption, normalize (FFmpeg).
+pick moments (Codex CLI; Claude optional fallback) -> cut, reframe, caption, normalize (FFmpeg).
 Every step is cached in <episode>/.work, so re-running resumes where it stopped.
 """
 
@@ -25,6 +25,8 @@ import tempfile
 import time
 from pathlib import Path
 
+import llm
+
 HERE = Path(__file__).resolve().parent
 FONTS_DIR = HERE / "fonts"
 PROMPT_FILE = HERE / "clip_prompt.md"
@@ -34,7 +36,7 @@ YOUTUBE_CHANNEL_URL = "https://www.youtube.com/@AnyaPostnikov"
 YOUTUBE_CTA = f"Watch PURSUIT on YouTube: {YOUTUBE_CHANNEL_URL}"
 
 MAX_CLIPS = 10          # never render more than this
-MIN_CLIPS = 5           # render at least this many if Claude found them...
+MIN_CLIPS = 5           # render at least this many if the AI found them...
 MIN_SCORE = 60          # ...otherwise only clips scoring at least this
 
 W, H = 1080, 1920       # output size
@@ -122,14 +124,6 @@ def find_ffmpeg():
         if re.search(r"\bass\b", filters):
             return ff, shutil.which("ffprobe") or "ffprobe"
     raise Fail("FFmpeg with subtitle support is missing.\nFix: brew install ffmpeg-full   (or re-run ./setup.sh)")
-
-
-def find_claude():
-    """Claude Code CLI: PATH first, then the usual install location."""
-    for c in [shutil.which("claude"), str(Path.home() / ".local/bin/claude"), str(Path.home() / ".claude/local/claude")]:
-        if c and os.path.exists(c):
-            return c
-    return None
 
 
 def check_deps(need_download):
@@ -302,37 +296,26 @@ def validate_analysis(data):
     return result
 
 
-def ask_claude(claude, prompt, timeout=900):
-    cmd = [claude, "-p", "--output-format", "json", "--no-session-persistence", "--tools", ""]
-    if os.environ.get("PURSUIT_MODEL"):
-        cmd += ["--model", os.environ["PURSUIT_MODEL"]]
-    with tempfile.TemporaryDirectory() as tmp:  # neutral folder: no project files/settings get picked up
-        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=tmp, timeout=timeout)
+def ask_llm(prompt, timeout=900, image=None):
+    """One prompt to the configured AI (Codex by default, Claude as optional fallback). See llm.py."""
     try:
-        envelope = json.loads(r.stdout)
-    except json.JSONDecodeError:
-        raise Fail(f"Claude CLI returned something unexpected:\n{(r.stdout or r.stderr)[-800:]}")
-    result = envelope.get("result") or ""
-    if envelope.get("is_error"):
-        if "logged in" in result.lower() or "/login" in result.lower():
-            raise Fail("Claude Code isn't logged in. Run  claude  once in Terminal, log in with your Claude account, then re-run.")
-        raise Fail(f"Claude CLI error: {result[:500]}")
-    return result
+        return llm.ask(prompt, timeout=timeout, image=image, log=log)
+    except llm.LLMUnavailable as e:
+        raise Fail(f"No AI is available right now ({e}).\n"
+                   "Codex: install it and run `codex login` (choose 'Sign in with ChatGPT'). "
+                   "If you hit your Codex usage limit, try again after it resets.")
+    except llm.LLMError as e:
+        raise Fail(str(e))
 
 
-def preflight_claude():
-    """Fail in seconds (not after a 10-minute download) if Claude Code can't be used."""
-    claude = find_claude()
-    if not claude:
-        log("WARNING: Claude Code CLI not found; after transcribing you'll get instructions to pick clips via claude.ai.")
-        return
-    try:
-        ask_claude(claude, "Reply with just the word OK.", timeout=60)
-    except subprocess.TimeoutExpired:
-        raise Fail("Claude Code didn't respond. Check your internet connection and try again.")
+def preflight_llm():
+    """Fail in seconds (not after a 10-minute download) if no AI can be used. Makes no model call."""
+    if not llm.available():
+        raise Fail(f"No AI is available right now ({llm.explain_unavailable()}).\n"
+                   "Fix: install Codex and run `codex login` (choose 'Sign in with ChatGPT'), then re-run.")
 
 
-def analyze(meta, transcript, work, llm):
+def analyze(meta, transcript, work, mode):
     out = work / "analysis.json"
     if out.exists():
         try:
@@ -340,28 +323,28 @@ def analyze(meta, transcript, work, llm):
         except (ValueError, json.JSONDecodeError) as e:
             raise Fail(f"{out} isn't valid clip JSON ({e}). Fix or delete it, then run again.")
     prompt = build_prompt(meta, transcript)
-    prompt_file = work / "claude_prompt.txt"
+    prompt_file = work / "clip_prompt.txt"
     write_text_atomic(prompt_file, prompt)
-    claude = find_claude() if llm == "claude" else None
-    if not claude:
+    if mode == "manual" or not llm.available():
         raise Fail(
-            "Claude Code CLI not found, so I can't pick the clips automatically.\n"
-            "Either install it (./setup.sh does this, then run `claude` once to log in),\n"
+            "No AI is available, so I can't pick the clips automatically "
+            f"({llm.explain_unavailable()}).\n"
+            "Either install Codex (./setup.sh does this, then run `codex login` once),\n"
             f"or do it by hand: paste the contents of\n  {prompt_file}\n"
-            f"into claude.ai, save Claude's JSON reply as\n  {out}\nand run the same command again.")
-    log("Asking Claude to find the best moments (1–3 min)...")
+            f"into any AI chat, save its JSON reply as\n  {out}\nand run the same command again.")
+    log("Asking the AI to find the best moments (1–3 min)...")
     last_err = None
     for attempt in range(2):
-        reply = ask_claude(claude, prompt if attempt == 0 else
-                           prompt + "\n\nIMPORTANT: respond with ONLY the JSON object, nothing else.")
+        reply = ask_llm(prompt if attempt == 0 else
+                        prompt + "\n\nIMPORTANT: respond with ONLY the JSON object, nothing else.")
         try:
             data = extract_json(reply)
             write_json_atomic(out, data, indent=2)
             return data
         except (ValueError, json.JSONDecodeError) as e:
             last_err = e
-            write_text_atomic(work / "claude_reply_unparsed.txt", reply)
-    raise Fail(f"Couldn't read Claude's reply as JSON ({last_err}). Raw reply saved in {work}.")
+            write_text_atomic(work / "llm_reply_unparsed.txt", reply)
+    raise Fail(f"Couldn't read the AI's reply as JSON ({last_err}). Raw reply saved in {work}.")
 
 
 # ----------------------------------------------------------------------------- 4. timing
@@ -397,7 +380,7 @@ def _find(words, approx_t, phrase, window, want_end):
 
 
 def snap_clip(clip, words):
-    """Turn Claude's approximate times into exact word boundaries with a little breathing room."""
+    """Turn the AI's approximate times into exact word boundaries with a little breathing room."""
     i = _find(words, float(clip["start"]), clip.get("start_words"), 25, want_end=False)
     j = _find(words, float(clip["end"]), clip.get("end_words"), 25, want_end=True)
     if j <= i:
@@ -650,14 +633,14 @@ def main():
     ap.add_argument("--video", help="local original video file to use instead of downloading (with a YouTube URL)")
     ap.add_argument("--out", default=str(DEFAULT_OUT), help=f"output folder (default: {DEFAULT_OUT})")
     ap.add_argument("--max", type=int, default=MAX_CLIPS, help="maximum clips to render (default 10)")
-    ap.add_argument("--redo", action="store_true", help="ask Claude again for new clip picks (keeps download + transcript)")
+    ap.add_argument("--redo", action="store_true", help="ask the AI again for new clip picks (keeps download + transcript)")
     ap.add_argument("--no-captions", action="store_true", help="don't add captions (for videos that already have captions burned in)")
     ap.add_argument("--crop-band", default="0:1",
                     help="use only part of the frame height, TOP:BOTTOM, e.g. 0.10:0.80 to drop captions burned into the video")
     ap.add_argument("--force-render", action="store_true", help=argparse.SUPPRESS)  # used for autopilot crop correction
     ap.add_argument("--keep-source", action="store_true", help="keep the downloaded full video afterwards (~1-3 GB)")
     ap.add_argument("--summary-json", help=argparse.SUPPRESS)  # used by autopilot.py
-    ap.add_argument("--llm", default="claude", choices=["claude", "manual"], help=argparse.SUPPRESS)
+    ap.add_argument("--llm", default="auto", choices=["auto", "codex", "claude", "manual"], help=argparse.SUPPRESS)
     args = ap.parse_args()
 
     try:
@@ -687,8 +670,10 @@ def main():
 
         if args.redo:
             (work / "analysis.json").unlink(missing_ok=True)
-        if args.llm == "claude" and not (work / "analysis.json").exists():
-            preflight_claude()
+        if args.llm in ("codex", "claude"):
+            os.environ["PURSUIT_LLM"] = args.llm
+        if args.llm != "manual" and not (work / "analysis.json").exists():
+            preflight_llm()
 
         src = local if local else download_video(url, work, ffmpeg)
         info = probe(ffprobe, src)
@@ -697,7 +682,7 @@ def main():
         transcript = transcribe(src, work, ffmpeg)
         analysis = analyze(meta, transcript, work, args.llm)
         chosen = select_clips(analysis)[: args.max]
-        log(f"Claude found {len(analysis['clips'])} candidates; rendering the best {len(chosen)}.")
+        log(f"The AI found {len(analysis['clips'])} candidates; rendering the best {len(chosen)}.")
 
         # FFmpeg filter strings choke on quotes/colons in paths, so subtitles + font live in a plain temp folder
         temp_context = tempfile.TemporaryDirectory(prefix="pursuit_")

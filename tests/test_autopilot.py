@@ -19,6 +19,16 @@ os.environ.update(PURSUIT_STATE_DIR=str(TMP / "state"), PURSUIT_OUT=str(TMP / "o
 import autopilot as ap  # noqa: E402
 import pursuit_clips as pc  # noqa: E402
 
+# Keep paths isolated even when another test imports autopilot before this module.
+ap.STATE_DIR = TMP / "state"
+ap.OUT_DIR = TMP / "out"
+ap.LOG_FILE = TMP / "log.txt"
+ap.STATUS_FILE = ap.OUT_DIR / "AUTOPILOT_STATUS.txt"
+for name, filename in (("STATE_FILE", "state.json"), ("LEDGER_FILE", "ledger.json"),
+                       ("CONFIG_FILE", "config.json"), ("QUEUE_FILE", "queue.json"),
+                       ("LOCK_FILE", "run.lock"), ("PAUSE_FILE", "PAUSED")):
+    setattr(ap, name, ap.STATE_DIR / filename)
+
 ACCOUNTS = {"youtube": "spc_yt", "instagram": "spc_ig", "tiktok": "spc_tt"}
 EXPECTED = {p: "pursuitthepod" for p in ACCOUNTS}   # tests simulate all three verified
 PINS = {"tiktok": "open_tiktok"}
@@ -279,6 +289,17 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(len(ids), 6)
 
+    def test_queue_rejects_audio_layout_and_episodes_older_than_a_month(self):
+        today = ap.now().strftime("%Y%m%d")
+        recent = dict(self.summary, meta=dict(self.summary["meta"], upload_date=today))
+        video = dict(self.clips[0], layout="video")
+        audio = dict(self.clips[1], layout="audio")
+        self.assertEqual(ap.add_to_queue([video, audio], recent, fresh=True), [ap.ext_id(recent["meta"], video)])
+
+        old_date = (ap.now() - dt.timedelta(days=31)).strftime("%Y%m%d")
+        old = dict(self.summary, meta=dict(self.summary["meta"], id="OLDVIDEO123", upload_date=old_date))
+        self.assertEqual(ap.add_to_queue([dict(self.clips[2], layout="video")], old, fresh=False), [])
+
     def test_queue_is_not_posted_until_auto_posting_is_enabled(self):
         self.tiktok_only()
         self.queue_two_episodes()
@@ -306,12 +327,12 @@ class AutopilotTests(unittest.TestCase):
         self.assertTrue(all(t.hour in ap.POST_HOURS for t in times))
         self.assertTrue(all((b - a) >= dt.timedelta(hours=2) for a, b in zip(times, times[1:])))
 
-    def test_queue_slots_are_exactly_the_five_daily_local_times(self):
+    def test_queue_slots_are_exactly_the_three_daily_local_times(self):
         original_now = ap.now
         try:
             ap.now = lambda: dt.datetime(2026, 9, 28, 8, 0, tzinfo=ap.TZ)
-            slots = ap.queue_slots({"posts": []}, 5)
-            self.assertEqual([(x.hour, x.minute) for x in slots], [(9, 0), (12, 0), (15, 0), (18, 0), (21, 0)])
+            slots = ap.queue_slots({"posts": []}, 3)
+            self.assertEqual([(x.hour, x.minute) for x in slots], [(9, 0), (15, 0), (21, 0)])
             self.assertTrue(all(x.tzinfo == ap.TZ for x in slots))
         finally:
             ap.now = original_now
@@ -453,9 +474,9 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(len(FakePostForMe.posts), ap.SCHEDULE_AHEAD)
         self.assertIn("STOPPED", ap.STATUS_FILE.read_text())
 
-    def test_claude_outage_does_not_use_up_attempts(self):
+    def test_ai_outage_does_not_use_up_attempts(self):
         state = {"episodes": {}}
-        with patch("autopilot.claude_available", return_value=False):
+        with patch("autopilot.llm_available", return_value=False):
             with self.assertRaises(ap.Transient):
                 ap.process_episode({"id": "EPISODE0001", "title": "t", "url": "u"}, state, dry_run=False)
         self.assertEqual(state["episodes"], {})
@@ -518,6 +539,48 @@ class AutopilotTests(unittest.TestCase):
         self.assertTrue(media.exists())
         ap.cleanup_posted_media({"status": "posted", "file": str(media)})
         self.assertFalse(media.exists())
+
+    # ---- post-now: explicit, confirmed, outside the queue ------------------------------------------
+    def post_now_setup(self):
+        self.tiktok_only()
+        clips = [dict(c, start_sec=10.0 + 100 * i, end_sec=40.0 + 100 * i, layout="video", duration_sec=30.0)
+                 for i, c in enumerate(self.clips)]
+        summary = dict(self.summary, meta=dict(self.summary["meta"], upload_date="20260602"), clips=clips)
+        ap.save(ap.QUEUE_FILE, {"clips": []})
+        return patch.object(ap, "render_and_check", lambda ep, rec, use_claude=True: (summary, clips, ["PASS"]))
+
+    def run_post_now(self, typed, count=2, dry_run=False):
+        args = type("A", (), {"url": "https://www.youtube.com/watch?v=VIDEOID1234", "count": count,
+                              "minutes": 5, "gap": 20, "dry_run": dry_run})
+        with patch("autopilot.sys.stdin.isatty", return_value=True), patch("builtins.input", return_value=typed), \
+                patch("builtins.print"):
+            ap.cmd_post_now(args)
+
+    def test_post_now_posts_an_old_episode_immediately_only_after_confirmation(self):
+        with self.post_now_setup():
+            queue_before = ap.QUEUE_FILE.read_bytes()
+            self.run_post_now("yes")                              # wrong phrase
+            self.assertEqual(FakePostForMe.posts, {})
+            self.run_post_now("POST 2 NOW")
+        posts = sorted(FakePostForMe.posts.values(), key=lambda p: p["scheduled_at"])
+        self.assertEqual(len(posts), 2)
+        self.assertTrue(all(p["social_accounts"] == ["spc_tt"] for p in posts))
+        times = [dt.datetime.fromisoformat(p["scheduled_at"].replace("Z", "+00:00")) for p in posts]
+        self.assertLess(times[0] - ap.now(), dt.timedelta(minutes=6))
+        self.assertEqual(times[1] - times[0], dt.timedelta(minutes=20))
+        self.assertEqual(ap.QUEUE_FILE.read_bytes(), queue_before)   # the regular queue is untouched
+
+    def test_post_now_never_reposts_a_moment_and_dry_run_posts_nothing(self):
+        with self.post_now_setup():
+            self.run_post_now("", dry_run=True)
+            self.assertEqual(FakePostForMe.posts, {})
+            self.run_post_now("POST 2 NOW")
+            self.run_post_now("POST 1 NOW")                       # only the one never-posted moment is left
+            with self.assertRaisesRegex(ap.Stop, "nothing to post"):
+                self.run_post_now("POST 1 NOW")
+        ranges = [(p["start_sec"], p["end_sec"]) for p in ap.load(ap.LEDGER_FILE, {})["posts"]]
+        self.assertEqual(len(ranges), len(set(ranges)), "a moment was posted twice")
+        self.assertEqual(len(FakePostForMe.posts), 3)
 
     def test_bad_key_stops(self):
         os.environ["PURSUIT_POSTFORME_KEY"] = "wrong"
