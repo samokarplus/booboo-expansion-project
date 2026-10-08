@@ -4,11 +4,11 @@ Deployment snapshot and prices checked: **October 8, 2026**. All schedules use *
 
 ## TL;DR
 
-**Anya makes the episode and uploads it to YouTube. The Mac makes clips. Post for Me publishes those clips to TikTok and YouTube Shorts. For Spotify, the Mac makes a full MP3, Cloudflare keeps it online, and Spotify reads our episode list. GitHub stores the code and these instructions.**
+**Anya uploads the original to YouTube. The Mac makes clips, and Post for Me publishes them to TikTok/Shorts. For Spotify, code prepares the MP3 and details; a browser-assisted dashboard upload has now published one real episode. Spotify still hosts the show. GitHub stores the code and instructions.**
 
 **Expected service cost at current small usage: about $10/month, plus the existing Claude subscription.** The $10 is Post for Me. Cloudflare should currently fit its free allowances. Spotify, YouTube, TikTok, and this GitHub repository add no required publishing subscription for this setup. This is an estimate before taxes, not a complete account invoice or spending cap.
 
-**Spotify is paused for a hosting decision:** creator sign-in is complete. Spotify's final migration warning says this Cloudflare route removes Spotify-hosted ads monetization and converts video episodes to audio. The final redirect was cancelled, hosting remains unchanged, and automatic podcast publication is OFF. Review the tradeoff below before connecting the feed.
+**Spotify status:** [the real 8:48 episode](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) is confirmed Published in the existing show through the dashboard. Spotify hosting is unchanged. The Cloudflare redirect was cancelled and that branch is OFF. The remaining task is a reliable unattended dashboard uploader, not moving the show to another host.
 
 ## Spotify Hosting and Monetization
 
@@ -16,7 +16,7 @@ The issue is the selected hosting method. Our custom RSS route automatically dis
 
 | Path | Publishing workflow | Monetization implications |
 | --- | --- | --- |
-| Keep Spotify hosting | Code prepares audio/copy; upload through Spotify's dashboard. Dashboard automation could be investigated, but is not implemented or guaranteed | Preserves the hosting requirement for applying to Spotify's program; audience/location/content eligibility still applies |
+| Keep Spotify hosting | Code prepares audio/copy; a real dashboard upload has succeeded. Unattended repetition is not yet implemented | Preserves the hosting requirement for applying to Spotify's program; audience/location/content eligibility still applies |
 | Use our Cloudflare RSS feed | Code can publish full audio automatically; Spotify imports the connected feed | The redirect warning removes this show's Spotify-hosted ads eligibility; external sponsorship income is separate |
 | Use an approved Spotify integration partner | Depends on that provider's supported automation and pricing | Some partners support eligible video monetization; not every external host does |
 
@@ -89,7 +89,7 @@ Workers Free allows 100,000 requests per day across the account. Hitting the Fre
 | Full YouTube episode | The source for everything | Finds the upload after it is published | Record/edit the original, upload it, choose title/description and visibility |
 | TikTok `@pursuitthepod` | Auto-posting enabled | Selects moments, edits/captions/checks clips and schedules up to 3/day at 9 AM, 3 PM and 9 PM | Maintain account connection; review quality/results; respond to comments |
 | YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled | Prepares approved clips and schedules up to 3/week, Mon/Wed/Fri at 5 PM | Maintain connection; optionally select the full episode as Related video in YouTube Studio |
-| Spotify | Signed in; Cloudflare feed ready; hosting decision paused and automation OFF | Already converted and hosted the approved first episode; can prepare audio | Decide hosting/monetization before migration. Keep current hosting until that decision is approved |
+| Spotify | Signed in; real episode published directly; Spotify hosting preserved | Prepares audio and copy; the browser-assisted upload has succeeded | Dashboard upload is still required per episode until unattended repetition is implemented; do not redirect hosting |
 | Google Drive review copies | Optional delivery enabled and test previously verified | Delivers up to 3 approved clips and posting text for each new episode; cleans tool-owned copies after 14 days | Review or download if useful; reauthorize Google if needed. Manual posting from Drive is optional |
 | Instagram | Not established here as an active automatic destination | Code supports a later account-connection workflow | Connect and verify the intended account before adding automated Reels |
 
@@ -114,34 +114,32 @@ flowchart TD
     K --> L[Spotify imports the connected feed]
 ```
 
-The Spotify branch is prepared and tested, but **recurring publication is currently OFF and Spotify has not yet been connected to this new feed**. The diagram describes the completed intended flow, not a claim that this final connection has already happened.
+The diagram above describes the optional Cloudflare RSS route. It is **not the chosen connection for this Spotify show**: its redirect was cancelled to preserve hosting-based monetization options. The current Spotify path is local MP3 preparation followed by a dashboard upload; one real episode has been published that way, but unattended repetition is not yet implemented.
 
-## Finish Spotify Once
+## Current Spotify Publication and Next Steps
 
-Already done: Cloudflare account/R2 activation, private bucket, bucket-only publishing credential, cover upload, server deployment, MP3 conversion, first feed publication, public audio/feed verification and initialization of watching for future uploads.
+Completed: creator sign-in, full MP3 preparation and a successful dashboard upload of [How to be More Consistent Than 99% of People](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH). Spotify confirms Published, Audio, 8:48. The show remains hosted by Spotify, and its existing monetization settings were not changed.
 
-The public feed is [pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml). Its first real entry is **How to be More Consistent Than 99% of People**. This proves our hosting works, not that Spotify has imported it.
+The separate Cloudflare server, cover, audio and RSS feed also work, but that feed is not connected to Spotify. Its automatic publishing switch remains OFF. There is no required RSS redirect for the direct dashboard route.
 
-Still to do:
+Remaining engineering work:
 
-1. Creator sign-in is now complete for [the PURSUIT show open in the dashboard](https://open.spotify.com/show/7KZqjxysKxNS4QntMCVG3B), which has a test episode. Review the monetization tradeoff before proceeding; a different similarly named listing was observed earlier, so confirm the intended show identity rather than creating another.
-2. Inspect that show's current hosting/feed settings. Connect the existing show to our public feed using the appropriate update or move-hosting procedure. If it is hosted by Spotify, moving to our host may require an RSS redirect. Do not create a duplicate show, delete the test episode, or redirect the old feed without reviewing and approving that change. [Spotify feed updates](https://support.spotify.com/dj-en/podcasters/article/updating-an-rss-feed-link-or-hosting-provider/), [moving a Spotify-hosted show](https://support.spotify.com/ws/creators/article/switching-away-from-spotify-for-creators-with-a-301-redirect/).
-3. Complete any ownership verification, then confirm the real episode appears in Spotify. A host migration can take time; it is not an immediate upload button.
-4. Enable recurring podcast publication on the Mac: `./autopilot podcast-auto on`.
+1. Make the successful dashboard workflow repeat unattended when a new eligible YouTube episode is detected. That uploader is not built or scheduled yet.
+2. Add persistent duplicate checks, resumable uploads and verification that Spotify reports the intended episode Published before recording success.
+3. Stop and request assistance when a sign-in challenge or unexpected page prevents safe completion. Never guess credentials or silently create another show.
+4. Test that recurring workflow on a future episode before calling it automatic.
 
-After that, Anya's normal recurring action is uploading the original episode to YouTube. The Mac handles full audio publication; Spotify refreshes on its own schedule. Older YouTube episodes are not automatically backfilled. Selected older episodes can be added with `./autopilot podcast-publish "YOUTUBE_URL"`.
+For now, code can prepare the audio and posting details, and an assisted dashboard upload can publish an episode. New episodes still need that dashboard step. The current selection rule accepts regular YouTube videos at least six minutes long; it does not classify whether a video is an interview, vlog or solo podcast.
 
-The current selection rule uses the YouTube channel's regular videos and a six-minute minimum. It does not reliably distinguish an interview podcast from a vlog or solo video by genre. If only certain uploads belong in the audio podcast, agree on a stricter selection rule before enabling automatic publication.
-
-For account-creation/deployment instructions or setting up a second machine, see [Spotify Setup](SPOTIFY_SETUP.md). The live account does not need to repeat the already completed steps.
+[Spotify Setup](SPOTIFY_SETUP.md) retains the external-RSS deployment reference and monetization warning. Do not use its migration steps for the current Spotify-hosted route.
 
 ## Everyday Routine
 
-**Anya:** publish the original episode to YouTube. Review the first outputs and check comments/analytics as desired. Set Related video on Shorts where useful. Once the Spotify connection is complete, no routine Spotify MP3 upload is required.
+**Anya:** publish the original episode to YouTube. Review the first outputs and check comments/analytics as desired. Set Related video on Shorts where useful. For the current Spotify-hosted route, each prepared MP3 still needs a dashboard upload until the unattended uploader is built.
 
 **Samo:** keep the Mac running with internet and free disk space, maintain the Claude/Post for Me sign-ins and account connections, check status when something stalls, and review bills/Cloudflare usage periodically. Keep credentials private; GitHub contains instructions, not the live keys.
 
-**Program:** watch for eligible uploads, prepare content, check it, track what has already been published and send it through the appropriate enabled branch. Cloudflare handles file availability; Post for Me handles submitted clip schedules; Spotify handles feed imports.
+**Program:** watch for eligible uploads, prepare content, check it, track what has already been published and send it through the appropriate enabled branch. Post for Me handles submitted clip schedules. Spotify hosts dashboard-uploaded episodes. The separate Cloudflare files remain online, but their feed is not connected to Spotify.
 
 ## When the Mac Is Off or Something Breaks
 

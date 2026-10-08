@@ -13,11 +13,11 @@ PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikT
 | Claude | Selects and checks short moments | Existing subscription |
 | Post for Me | Schedules and publishes TikToks and Shorts | $10 baseline |
 | Cloudflare | Stores full MP3s and serves our RSS episode list | $0 expected initially; limits apply |
-| Spotify | Imports the connected feed for listeners | $0 required |
+| Spotify | Hosts the show and its published audio for listeners | $0 required |
 | Google Drive | Optional review copies of Shorts | $0 extra with sufficient storage |
 | GitHub | Stores code, history and these instructions | $0 extra required |
 
-**Your normal job:** upload the original to YouTube and keep the Mac awake/online for new work. TikTok and weekly Shorts are enabled. Spotify's hosting decision is paused over monetization: no redirect was confirmed and podcast automation is OFF. Shorts' Related video field is a manual step when wanted.
+**Your normal job:** upload the original to YouTube and keep the Mac awake/online for new work. TikTok and weekly Shorts are enabled. A real episode is now published directly on Spotify, with Spotify hosting preserved. Unattended Spotify dashboard uploads are not built yet; the Cloudflare publishing branch remains OFF. Shorts' Related video field is a manual step when wanted.
 
 Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing), [Cloudflare](https://developers.cloudflare.com/r2/pricing/). Detailed costs, schedules, setup and responsibilities are below.
 
@@ -34,7 +34,7 @@ Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing)
 | Original YouTube episode | Human upload; source for the program | Record/edit and upload the original episode |
 | TikTok `@pursuitthepod` | Automatic posting enabled; up to 3/day at 9 AM, 3 PM and 9 PM Denver time | Maintain account connection and review results; no routine clip upload |
 | YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5 PM Denver time | Maintain connection; set Related video in YouTube Studio when wanted |
-| Spotify | First real audio/feed verified; Spotify connection pending; recurring publication OFF | Finish creator sign-in, connect the existing show to our feed, verify import, then enable automation |
+| Spotify | Real 8:48 episode published directly in the existing Spotify-hosted show; unattended uploads not built | Use the dashboard upload flow for now; no hosting redirect needed |
 | Google Drive | Optional review delivery enabled; previous test verified | Review/download copies if useful; refresh Google login if it expires |
 
 Schedules are ceilings, not quotas: unsuitable or missing clips leave empty slots. The Mac must be awake and online to prepare new content. Clips already submitted to Post for Me can publish while it is off; existing Cloudflare audio remains available too.
@@ -54,11 +54,11 @@ flowchart TD
     D --> F[YouTube Shorts]
     C --> G[Optional Drive review copies]
     B --> H[Full MP3 and RSS episode list]
-    H --> I[Cloudflare stores and serves files]
-    I --> J[Spotify imports the connected feed]
+    H --> I[Browser-assisted upload to Spotify dashboard]
+    I --> J[Spotify hosts and publishes the episode]
 ```
 
-The Spotify branch still needs its final account/feed connection. Our public [RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) already contains **How to be More Consistent Than 99% of People**. That confirms our hosting, not Spotify availability. There is an [existing PURSUIT Spotify show](https://open.spotify.com/show/7KZqjxysKxNS4QntMCVG3B); use it rather than creating a duplicate.
+**Published directly on Spotify:** [How to be More Consistent Than 99% of People](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH), 8:48. The dashboard confirms Published. This was a browser-assisted upload, not a completed unattended uploader. Spotify hosting was preserved. The separate [Cloudflare RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) is online but is not connected to this show; redirecting to it is paused because of the monetization tradeoff.
 
 ## What Each Thing Does
 
@@ -74,8 +74,8 @@ The Spotify branch still needs its final account/feed connection. Our public [RS
 | YouTube Shorts | Another destination for the short clips, on the existing PURSUIT YouTube channel. | YouTube, published through Post for Me | Review results and optionally set the Related video field. |
 | Cloudflare R2 | The online shelf that stores the full MP3s, cover image, and episode list. | Cloudflare | Maintain the account/billing; check usage occasionally. |
 | Cloudflare Worker | Our small server that lets Spotify and listeners fetch files from that shelf. | Cloudflare, at our `workers.dev` address | Already deployed; no separate domain purchase needed. |
-| RSS feed | A public episode list containing the show details and links to each MP3. It is a file, not another service or subscription. | Generated by our code and served through Cloudflare | Connect this stable address to Spotify once. |
-| Spotify for Creators / Spotify | The creator dashboard manages the show; Spotify imports the feed so listeners can play episodes. | Spotify | Complete the current feed connection, then monitor imports and the show. |
+| RSS feed | A public episode list containing the show details and links to each MP3. It is a file, not another service or subscription. | Generated by our code and served through Cloudflare | Optional external-hosting route only; not connected to the current Spotify-hosted show. |
+| Spotify for Creators / Spotify | The creator dashboard manages the show; Spotify imports the feed so listeners can play episodes. | Spotify | Current route uses dashboard uploads; recurring unattended uploads still need implementation. |
 | Google Drive | Optional review copies of finished Shorts and their posting text. | Google Drive | Use when Anya wants to inspect or manually reuse a clip. |
 | GitHub | The shared code, change history, and instruction manual. | GitHub | Read setup instructions and keep code changes recorded. It does not run the daily program. |
 
@@ -237,17 +237,19 @@ Useful commands:
 
 A controlled real-world Drive test and a real three-Short batch were successfully uploaded and downloaded back for integrity verification before automatic delivery was enabled. The recurring new-episode path is covered by automated tests; the first completely hands-off future episode remains the final real-world validation of that recurring path.
 
-## Spotify: Automatic Full Episodes
+## Spotify: Current Publication and Automation
+
+The first real episode was uploaded through Spotify for Creators and confirmed Published. The MP3 and episode details came from our local preparation code. The next engineering task is making that dashboard upload repeat reliably for new YouTube episodes. No unattended dashboard uploader or recurring browser job is enabled yet. Spotify continues to host the show; no hosting redirect was applied.
 
 **Hosting decision paused:** Spotify's final redirect dialog says moving this show to our Cloudflare feed removes Spotify-hosted ads monetization and converts existing video episodes to audio. We cancelled that dialog and left automation OFF. Preserve Spotify hosting while deciding whether built-in monetization or our current automatic RSS route is the priority. Automation itself does not prohibit earnings: Spotify supports some approved partner-host integrations, but our custom feed is not one of them. See [the hosting tradeoff](PROJECT_GUIDE.md#spotify-hosting-and-monetization) before following migration instructions.
 
 The program downloads the full YouTube episode, converts it to MP3, uploads it to Cloudflare R2, and updates a public podcast RSS feed. After Anya connects that feed to Spotify once, Spotify imports future episodes. No per-episode Spotify upload is needed. Spotify controls the import delay; `published` in this tool means the public feed has been verified, not that Spotify has finished importing it.
 
-**Live setup status, October 8, 2026:** the Cloudflare account, private bucket, publishing credential, cover upload and server deployment are complete. The first approved real episode is published to our [public feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml), and public audio/feed verification passed. Spotify has not yet been connected to this new feed; recurring publication is OFF. Start with [Finish Spotify Once](PROJECT_GUIDE.md#finish-spotify-once), not the account-creation steps already completed below.
+**Live setup status, October 8, 2026:** the Cloudflare account, private bucket, publishing credential, cover upload and server deployment are complete. The first approved real episode is published to our [public feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml), and public audio/feed verification passed. Spotify has not yet been connected to this new feed; recurring publication is OFF. Start with [Current Spotify Publication and Next Steps](PROJECT_GUIDE.md#current-spotify-publication-and-next-steps), not the account-creation steps already completed below.
 
 For the plain-English overview and monthly budget, read [Services, Costs, and What You Do](PROJECT_GUIDE.md). The following instructions remain useful for an initial setup or another machine.
 
-For the remaining one-time connection and everyday responsibilities, see [Finish Spotify Once](PROJECT_GUIDE.md#finish-spotify-once). Thereafter the user uploads the original to YouTube and the enabled program publishes full audio through our feed. Spotify controls when it imports updates.
+For the remaining one-time connection and everyday responsibilities, see [Current Spotify Publication and Next Steps](PROJECT_GUIDE.md#current-spotify-publication-and-next-steps). Thereafter the user uploads the original to YouTube and the enabled program publishes full audio through our feed. Spotify controls when it imports updates.
 
 ## Safety
 
