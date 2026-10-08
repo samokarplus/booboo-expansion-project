@@ -2,7 +2,11 @@
 
 ## TL;DR
 
-A local **podcast-to-short-form content engine** for PURSUIT with two production outputs. It watches the podcast's YouTube channel, transcribes old and new episodes, uses Claude to find coherent standalone moments, turns them into polished vertical clips with captions/framing/audio normalization, and quality-checks them. Approved TikTok clips can be queued and published automatically through Post for Me; for every new PURSUIT episode, the system also prepares up to **3 review-ready YouTube Shorts** and automatically delivers the finished MP4s plus posting copy to a shared Google Drive folder for manual review and upload. New episodes get priority, duplicate moments are avoided, failures recover safely, and the system targets up to **5 posts per day** without routine human editing, clip selection, queue management, or posting. The TikTok side continuously replenishes approved content toward a **21-clip target buffer**; this is a target, not a claim that 21 clips are currently ready. Only clips that have actually passed QC count as available inventory. Once TikTok clips have been submitted/scheduled with Post for Me, those scheduled posts can publish from the cloud even if the Mac is powered off; the Mac must be on to create, QC, replenish, submit new TikTok clips, and prepare/deliver new Shorts to Drive. YouTube Shorts are **not automatically published**: Drive is the review/delivery layer, and Anya chooses which finished Shorts to upload manually. Every automated TikTok/Instagram caption includes a fixed CTA to **@AnyaPostnikov on YouTube** before the hashtags, creating a funnel from short-form clips to full PURSUIT episodes. Until the TikTok account reaches **1,000 followers** and can add a clickable website link, the profile bio directs viewers to `@AnyaPostnikov`; once eligible, the YouTube channel URL can be added as the clickable website.
+A local **podcast-to-short-form content engine** for PURSUIT. It watches the podcast's YouTube channel, transcribes episodes, uses Claude to find standalone moments, renders captioned vertical clips, and checks their quality. The current local deployment schedules approved clips through Post for Me to **TikTok @pursuitthepod, up to 3 posts per day**, and to the connected **[PURSUIT with Anya Postnikov YouTube channel (@AnyaPostnikov)](https://www.youtube.com/@AnyaPostnikov), up to 3 Shorts per week**.
+
+**YouTube automatic publishing is now enabled:** Monday, Wednesday, and Friday at **5 PM America/Denver**. The destination is pinned to channel ID `UCkw_7bkF1qSRrupIvN4SIAg`. The first Short is confirmed as scheduled in Post for Me for **Friday, October 9, 2026 at 5 PM Denver time**; that is a scheduling confirmation, not a claim it has already published.
+
+TikTok uses separate **9 AM, 3 PM, and 9 PM Denver-time** slots and a **12-clip target buffer**. YouTube maintains its own weekly schedule and duplicate-protection ledger. These are ceilings, not quotas: slots remain empty when no eligible clip is available. New episodes get priority. Submitted posts can publish from Post for Me's cloud while the Mac is off; the Mac must be on to generate, check, and submit more clips. Google Drive review delivery remains an optional, separate workflow. TikTok/Instagram captions link viewers to @AnyaPostnikov on YouTube.
 
 An automated podcast growth system built for **PURSUIT**.
 
@@ -25,12 +29,13 @@ The system automatically:
 - Maintains its own approved-content buffer and replenishes it from the back catalog.
 - Gives newly published podcast episodes priority over older material.
 - Schedules and publishes approved clips through Post for Me.
-- Targets up to **five posts per day** at **9 AM, 12 PM, 3 PM, 6 PM, and 9 PM local time**. Five is a ceiling, not a quota: if nothing good passes QC, the slot is skipped.
-- Checks for new episodes six times per day and works toward a **21-clip approved-buffer target**.
+- Targets up to **three TikTok posts per day** at **9 AM, 3 PM, and 9 PM America/Denver**. Three is a ceiling, not a quota: if nothing good passes QC, the slot is skipped.
+- Automatically schedules **three YouTube Shorts per week** to the connected **PURSUIT with Anya Postnikov (@AnyaPostnikov)** channel, on **Monday, Wednesday, and Friday at 5 PM America/Denver**.
+- Checks for new episodes six times per day and works toward a **12-clip approved-buffer target**.
 - Recovers safely from interrupted processing, Mac sleep/restarts, network failures, and ambiguous publishing responses.
 - For each **new** PURSUIT episode, automatically prepares up to **3** strong, non-overlapping YouTube Shorts after the normal processing/QC pass and uploads the finished 1080x1920 MP4s to the shared `PURSUIT - Shorts Ready to Post` Google Drive folder.
 - Generates a `POSTING_INFO.txt` alongside each Shorts batch with ready-to-copy YouTube titles/descriptions and the full-episode link.
-- Keeps YouTube human-in-the-loop: the system does **not** connect to or publish to Anya's YouTube account; she reviews the Drive files and manually posts whichever Shorts she wants.
+- Keeps weekly YouTube publishing separate from TikTok scheduling. The optional Drive workflow also supports reviewing finished files; Drive sign-in is not required for Post for Me publishing.
 - Catches up on multiple new episodes after Mac sleep/offline time, retries failed Drive deliveries without losing the prepared package, and prevents duplicate batches per episode.
 - Cleans tool-owned Drive delivery files after **14 days** while preserving source/transcript/analysis data and social-production assets.
 
@@ -48,7 +53,8 @@ Long-form PURSUIT podcast
         -> approved content buffer
         -> quality-approved clips
         -> TikTok: queue + scheduled publishing through Post for Me
-        -> YouTube Shorts: up to 3 finished MP4s + posting copy -> shared Drive -> human review/manual upload
+        -> YouTube Shorts: Post for Me -> @AnyaPostnikov -> Mon/Wed/Fri at 5 PM Denver
+        -> Optional review copies: shared Google Drive
         -> repeat
 ```
 
@@ -64,7 +70,7 @@ YouTube podcast episode
         -> technical and visual quality control
         -> output routing
              -> TikTok: Post for Me -> automatic publishing
-             -> YouTube Shorts: Google Drive -> Anya reviews -> manual publishing
+             -> YouTube Shorts: Post for Me -> automatic publishing, 3 per week
              -> Instagram Reels: available as a future Post for Me destination once the intended account is connected/tested
 ```
 
@@ -72,7 +78,7 @@ This is a small, local macOS command-line tool. It is not a web app and it does 
 
 ## About Post for Me and Connecting YouTube
 
-[Post for Me](https://www.postforme.dev/) is a hosted social-media publishing service operated by **Day Moon Development LLC**. It gives apps one interface for account connections, video uploads, scheduling, and publishing across **nine platforms**, including TikTok, Instagram, and YouTube. In this project, the Mac does the creative work: finding moments, editing, captioning, and checking clips. Post for Me handles delivery of the approved TikTok posts.
+[Post for Me](https://www.postforme.dev/) is a hosted social-media publishing service operated by **Day Moon Development LLC**. It gives apps one interface for account connections, video uploads, scheduling, and publishing across **nine platforms**, including TikTok, Instagram, and YouTube. In this project, the Mac does the creative work: finding moments, editing, captioning, and checking clips. Post for Me handles delivery of approved TikTok posts and the weekly YouTube Shorts.
 
 ### Who runs it and how established is it?
 
@@ -88,7 +94,7 @@ The owner can disconnect YouTube in Post for Me or revoke its access through [Go
 
 ### How PURSUIT currently uses YouTube
 
-**This explanation does not enable or connect YouTube publishing.** PURSUIT's current YouTube Shorts workflow remains: create finished clips locally, deliver them to Google Drive, and let Anya review and upload them herself. Making those clips does not require connecting her YouTube account to Post for Me. A future connection would be a separate choice by the channel owner.
+**As of October 7, 2026, automatic YouTube Shorts scheduling is enabled in the local deployment.** Post for Me is connected to **PURSUIT with Anya Postnikov (@AnyaPostnikov)**, pinned by channel ID `UCkw_7bkF1qSRrupIvN4SIAg`. Quality-approved Shorts are scheduled on **Monday, Wednesday, and Friday at 5 PM America/Denver**, independently of TikTok's three-per-day schedule. Up to three Shorts are submitted ahead, and empty slots are skipped. Creating clips happens locally; publishing uses the connected YouTube authorization. Optional Drive review delivery remains available separately.
 
 ## What It Does
 
@@ -102,12 +108,13 @@ The current local build goes beyond one-off clip generation. It can run as a sch
 - Renders 9:16 clips with captions, framing, and normalized audio.
 - Runs technical, editorial, caption, framing, and audio quality control; weak candidates are rejected rather than posted just to fill a slot.
 - Maintains an internal buffer of approved clips without requiring the user to manage the queue.
-- Processes another back-catalog episode roughly every three hours when the buffer needs content, and pauses backlog work when about a week's worth of clips is ready.
-- Targets up to five TikTok posting slots per day at **9 AM, 12 PM, 3 PM, 6 PM, and 9 PM local time**. Five is a ceiling, not a quota; a slot is skipped when no clip passes QC.
+- Processes another back-catalog episode roughly every three hours when the buffer needs content, and pauses backlog work when roughly four days of clips are ready.
+- Targets up to three TikTok posting slots per day at **9 AM, 3 PM, and 9 PM America/Denver**. A slot is skipped when no clip passes QC.
+- Schedules YouTube Shorts independently on **Monday, Wednesday, and Friday at 5 PM America/Denver** to **PURSUIT with Anya Postnikov (@AnyaPostnikov)**.
 - Tracks processed episodes, used time ranges, queued clips, and posts to prevent duplicate content.
 - Uses persistent state, retries, locking, and reconciliation so interruptions, restarts, and ambiguous API failures do not blindly create duplicate posts.
 - Keeps unattended posting OFF until a controlled real post has been confirmed live.
-- Currently supports a verified/pinned TikTok destination for unattended publishing. Instagram Reels can be added later through the same controlled account-pinning/live-test process. YouTube Shorts intentionally use the separate Drive review workflow rather than unattended publishing.
+- Uses verified TikTok and pinned YouTube destinations for unattended publishing. Instagram Reels can be added later through the controlled account-pinning/live-test process. Google Drive review delivery is an optional additional output.
 
 In short:
 
@@ -130,7 +137,7 @@ PURSUIT old + new YouTube episodes
 - Uses FFmpeg and OpenCV to create 1080x1920 H.264/AAC clips, frame the speaker, burn highlighted ASS captions, and normalize audio to -14 LUFS.
 - Handles static-image/audio-only episodes with an audiogram layout.
 - Rejects clips that fail technical, editorial, caption, framing, or audio checks.
-- Can leave finished clips for manual posting, schedule approved TikTok clips through Post for Me, and automatically deliver review-ready YouTube Shorts to Google Drive.
+- Can leave finished clips for manual posting, schedule approved TikTok clips and weekly YouTube Shorts through Post for Me, and optionally deliver review copies to Google Drive.
 
 ## Requirements
 
@@ -138,8 +145,8 @@ PURSUIT old + new YouTube episodes
 - macOS and Homebrew
 - A Claude subscription with the Claude Code CLI logged in
 - Approximately 2 GB for the Python environment and Whisper model, plus temporary space while an episode is processed
-- For TikTok autopilot posting: your own Post for Me account/API key and the intended TikTok account
-- For automated Shorts delivery: a Google OAuth Desktop client with Drive access and a shared Drive folder
+- For automatic publishing: your own Post for Me account/API key, the intended TikTok account, and the intended connected YouTube channel
+- For optional Drive review delivery: a Google OAuth Desktop client with Drive access and a shared Drive folder
 - Instagram is optional; if automatic Reels publishing is added later, connect and verify the intended eligible Instagram account before enabling it
 
 In the current deployment, Claude is used through the logged-in Claude Code subscription rather than a separately configured Anthropic API key, so the pipeline consumes normal Claude plan usage rather than a separate per-call API bill. Local Whisper/FFmpeg processing and Google Drive API delivery add no per-episode software charge; Drive files use the account's normal storage. TikTok autopilot uses Post for Me, which is the main incremental recurring service cost in this deployment (currently $10/month for the account in use; pricing can change).
@@ -237,9 +244,9 @@ Install the LaunchAgent after setup and testing:
 ./install_autopilot.sh
 ```
 
-It checks the PURSUIT YouTube channel six times per day. New episodes jump ahead of the older catalog. When the approved buffer needs content, the scheduled worker can process another back-catalog episode roughly every three hours; it pauses backlog processing when about a week's worth of approved clips is already waiting.
+It checks the PURSUIT YouTube channel six times per day. New episodes jump ahead of the older catalog. When the approved buffer needs content, the scheduled worker can process another back-catalog episode roughly every three hours; it pauses backlog processing when roughly four days of approved clips are already waiting.
 
-After the controlled live-post gate has succeeded and unattended posting is explicitly enabled, the current target is up to five TikTok posting slots per day at **9:00, 12:00, 15:00, 18:00, and 21:00 local time**. A slot is skipped rather than publishing a clip that did not pass quality control. The queue is an internal reliability mechanism and does not require daily manual management.
+After the controlled live-post gate has succeeded and unattended TikTok posting is enabled, the target is up to three TikTok posts per day at **09:00, 15:00, and 21:00 America/Denver**. Separately, YouTube weekly publishing is enabled for **PURSUIT with Anya Postnikov (@AnyaPostnikov)** on **Monday, Wednesday, and Friday at 17:00 America/Denver**. A slot is skipped rather than publishing a clip that did not pass quality control. The queue is an internal reliability mechanism and does not require daily manual management.
 
 ```bash
 ./autopilot status
@@ -257,11 +264,11 @@ Runtime data is stored outside the repository:
 - Logs: `~/Library/Logs/pursuit-autopilot.log`
 - Clips/status: `~/Desktop/PURSUIT_CLIPS/`
 
-## YouTube Shorts Review Delivery
+## Optional YouTube Shorts Review Delivery
 
-YouTube Shorts deliberately use a **human-review workflow** instead of automatic publishing. Once Drive delivery is enabled, each newly uploaded PURSUIT episode is processed by the existing episode/transcription/Claude/QC pipeline. After that processing finishes, the delivery layer prepares up to **3** of the strongest approved, non-overlapping, on-camera clips. Fewer are delivered when fewer clips meet the quality bar.
+In addition to the active weekly Post for Me publishing schedule, Google Drive supports an optional **human-review workflow**. Once Drive delivery is enabled, each newly uploaded PURSUIT episode is processed by the existing episode/transcription/Claude/QC pipeline. After that processing finishes, the delivery layer prepares up to **3** of the strongest approved, non-overlapping, on-camera clips. Fewer are delivered when fewer clips meet the quality bar.
 
-The finished 1080x1920 H.264/AAC MP4s and a `POSTING_INFO.txt` file are uploaded automatically to the shared Google Drive folder **PURSUIT - Shorts Ready to Post**. Anya can open that folder on her phone, review the finished videos, and manually upload whichever ones she wants to YouTube Shorts. The pipeline has no YouTube publishing permission in this workflow.
+The finished 1080x1920 H.264/AAC MP4s and a `POSTING_INFO.txt` file are uploaded automatically to the shared Google Drive folder **PURSUIT - Shorts Ready to Post**. Anya can open that folder on her phone, review the finished videos, and manually upload whichever ones she wants to YouTube Shorts. The Drive delivery module does not publish to YouTube; the separate weekly publisher uses the connected YouTube account through Post for Me.
 
 The Drive path is designed to be unattended but fail-safe: one batch per episode, stable Drive IDs/checksums, duplicate reconciliation after interrupted uploads, local preservation before upload, retry after authentication/network failure, catch-up when multiple episodes arrive while the Mac is asleep, and 14-day cleanup limited to files the tool can prove it owns. If the configured folder disappears or its identity cannot be verified, the tool fails closed rather than silently creating/switching to another folder.
 
@@ -288,7 +295,7 @@ A controlled real-world Drive test and a real three-Short batch were successfull
 - **Private atomic state:** state and ledger files are written atomically with mode `0600`.
 - **Real dry runs:** dry-run processing does not alter production state or call posting endpoints.
 - **Explicit live test:** the one-clip live test requires an exact interactive confirmation.
-- **No channel administration:** the tool does not use YouTube write/delete APIs and cannot edit or delete existing channel videos.
+- **YouTube publishing scope:** the weekly publisher submits new Shorts through Post for Me. Its implementation does not edit or delete existing YouTube videos; the Google consent screen defines the service's authorized access.
 
 Posts already scheduled on Post for Me are controlled by Post for Me. Pausing or uninstalling this local tool does not cancel them; use the Post for Me dashboard when cancellation is required.
 
