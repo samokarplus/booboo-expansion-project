@@ -173,7 +173,9 @@ cd ~/Documents/PURSUIT_CLIPS_TOOL
 
 The live Mac has private settings, credentials, processing history and generated files. GitHub stores reviewed source changes and documentation. Pushing documentation does not change account permissions or activate posting.
 
-The local Mac currently includes Shorts/Drive modules and other earlier changes that have not all been committed to GitHub. This guide accurately describes the **live deployment**, but a fresh clone is not yet a complete copy of that deployment. The Spotify modules and server are committed. Synchronizing the remaining local code is a separate maintenance task; don't overwrite the working Mac checkout with a fresh clone.
+**Source synchronization (October 8, 2026):** The Codex migration was committed to `main` as `521d0ca`, and the previously uncommitted Shorts/Drive modules, tests, and podcast source files were included. Claude is off by default; normal AI processing uses Codex authenticated through the existing ChatGPT subscription. Claude is only used if explicitly enabled with `PURSUIT_LLM=claude` or `PURSUIT_LLM_FALLBACK=claude`. A Codex failure or usage limit pauses AI processing until a later run rather than automatically switching to Claude.
+
+The migration passed 136 automated tests and two real Codex smoke-test calls (transcript analysis and visual quality check). **End-to-end unattended scheduled runs are not yet verified**, so check at least one new-episode run and review clip quality before canceling Claude. The source is synchronized, but a fresh clone still needs Mac setup, private credentials, account connections, and runtime state; GitHub does not contain those files.
 
 Keep this guide's snapshot updated whenever a service, schedule, price assumption or activation state changes. Use actual invoices for money, the Mac's status/configuration for enabled settings, and each destination's dashboard to confirm real publication.
 
