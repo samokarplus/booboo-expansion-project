@@ -1,12 +1,31 @@
 # Booboo Expansion Project
 
-PURSUIT's episode distribution system. Anya uploads the original episode to YouTube; code running on the Mac prepares short social videos and full podcast audio.
+## Quick Read
 
-## TL;DR
+PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikToks, YouTube Shorts, and full podcast audio. It runs on the Mac; GitHub is the code and instruction manual.
 
-**Expected service budget: about $10/month, plus the existing Claude subscription.** Post for Me is the $10 baseline. Cloudflare should currently fit its free allowances; it can charge for R2 overages. Spotify, YouTube, TikTok and this GitHub repository add no required publishing subscription in this setup. This estimate excludes taxes, hardware/internet, optional extras and other personal subscriptions. [Post for Me pricing](https://www.postforme.dev/pricing), [Cloudflare pricing](https://developers.cloudflare.com/r2/pricing/).
+**Monthly budget: about $10 plus the existing Claude subscription.** Cloudflare is expected to cost $0 at current usage, but storage/request overages can be billed. Taxes, optional upgrades and normal computer/internet costs are separate. Claude's exact plan price has not been verified.
 
-**Who does what:** Anya makes and uploads the original. The Mac edits clips and converts audio. Post for Me schedules TikTok/Shorts. Cloudflare stores and serves full MP3s and our episode list. Spotify imports that list after its one-time connection. GitHub stores the code and instructions; it does not run the daily work.
+| Tool | What it does | Monthly cost |
+| --- | --- | --- |
+| YouTube | Holds the original episodes and published Shorts | $0 additional required |
+| Mac + our program | Downloads, transcribes, edits and converts files | $0 software fee |
+| Claude | Selects and checks short moments | Existing subscription |
+| Post for Me | Schedules and publishes TikToks and Shorts | $10 baseline |
+| Cloudflare | Stores full MP3s and serves our RSS episode list | $0 expected initially; limits apply |
+| Spotify | Imports the connected feed for listeners | $0 required |
+| Google Drive | Optional review copies of Shorts | $0 extra with sufficient storage |
+| GitHub | Stores code, history and these instructions | $0 extra required |
+
+**Your normal job:** upload the original to YouTube and keep the Mac awake/online for new work. TikTok and weekly Shorts are enabled. Spotify still needs the existing show's feed connection and first import verified before automation is switched on. Shorts' Related video field is a manual step when wanted.
+
+Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing), [Cloudflare](https://developers.cloudflare.com/r2/pricing/). Detailed costs, schedules, setup and responsibilities are below.
+
+---
+
+## Deep Dive
+
+### Current Deployment
 
 **Where we are, October 8, 2026:**
 
@@ -24,18 +43,6 @@ Schedules are ceilings, not quotas: unsuitable or missing clips leave empty slot
 
 For the earlier provider/security background, see [Post for Me and Connecting YouTube](POSTFORME.md).
 
-## Monthly Cost Snapshot
-
-| Item | Monthly budget |
-| --- | --- |
-| Post for Me | $10 baseline; verify the account invoice |
-| Cloudflare R2 + our Worker | $0 expected at current small usage; free limits apply |
-| Spotify / YouTube / TikTok / GitHub repository | $0 additional required publishing/repository fee |
-| Google Drive review copies | $0 additional while existing storage is sufficient |
-| Claude | Existing subscription; its plan price has not been verified here |
-
-R2 currently includes 10 GB-month of Standard storage. At our 160 kbps setting, 100 hours of audio is about 7.2 GB. Storage-only estimates: 500 hours about $0.39/month; 1,000 hours about $0.93/month. Extra requests, small overhead and rounding are additional. Workers Free has a 100,000-request daily limit and can stop serving when exhausted; it is not an unlimited free plan. See the [full budget explanation](PROJECT_GUIDE.md#monthly-costs).
-
 ## The Two Publishing Paths
 
 ```mermaid
@@ -52,6 +59,31 @@ flowchart TD
 ```
 
 The Spotify branch still needs its final account/feed connection. Our public [RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) already contains **How to be More Consistent Than 99% of People**. That confirms our hosting, not Spotify availability. There is an [existing PURSUIT Spotify show](https://open.spotify.com/show/2EOi7bHXVbBCbYJgXm6fWu); use it rather than creating a duplicate.
+
+## What Each Thing Does
+
+| Thing | Plain-English job | Where it runs | When you need it |
+| --- | --- | --- | --- |
+| YouTube full episodes | The original video and the starting point for all distribution. | YouTube | Anya uploads each original episode here. |
+| Our Python program / autopilot | Finds uploads, prepares content, checks quality, and sends finished files to the right service. | Your Mac | Automatically during scheduled runs; manually for troubleshooting. |
+| macOS LaunchAgent | The alarm clock that starts the program at configured times. | Your Mac | Keep it installed; the Mac must be awake and online to do new work. |
+| Claude Code | Helps choose useful short moments and assess whether the clips make sense. | Called from the Mac using the logged-in Claude subscription | Maintain its subscription/login and available usage. |
+| Whisper, FFmpeg, OpenCV, yt-dlp | Transcribe speech, edit/convert files, inspect video, and retrieve the source episode. | Your Mac | No separate paid account; occasionally update them when downloading breaks. |
+| Post for Me | Receives finished clips, holds their schedules, and posts them to the connected social accounts. | Post for Me's servers | Maintain one subscription and the TikTok/YouTube connections. |
+| TikTok | Where viewers see the short clips. | TikTok | Check results, comments, and any account issues. |
+| YouTube Shorts | Another destination for the short clips, on the existing PURSUIT YouTube channel. | YouTube, published through Post for Me | Review results and optionally set the Related video field. |
+| Cloudflare R2 | The online shelf that stores the full MP3s, cover image, and episode list. | Cloudflare | Maintain the account/billing; check usage occasionally. |
+| Cloudflare Worker | Our small server that lets Spotify and listeners fetch files from that shelf. | Cloudflare, at our `workers.dev` address | Already deployed; no separate domain purchase needed. |
+| RSS feed | A public episode list containing the show details and links to each MP3. It is a file, not another service or subscription. | Generated by our code and served through Cloudflare | Connect this stable address to Spotify once. |
+| Spotify for Creators / Spotify | The creator dashboard manages the show; Spotify imports the feed so listeners can play episodes. | Spotify | Complete the current feed connection, then monitor imports and the show. |
+| Google Drive | Optional review copies of finished Shorts and their posting text. | Google Drive | Use when Anya wants to inspect or manually reuse a clip. |
+| GitHub | The shared code, change history, and instruction manual. | GitHub | Read setup instructions and keep code changes recorded. It does not run the daily program. |
+
+Cloudflare stores and serves the podcast files. Our code decides what to publish and creates the RSS feed. Post for Me handles the short social videos, not Spotify audio. There is no additional managed podcast-host subscription in this workflow.
+
+Earlier details about Post for Me's operator, account permissions and disconnecting YouTube are preserved in [Post for Me Background](POSTFORME.md). They are reference material, not another required service or setup task.
+
+For the full budget, each platform's human steps and troubleshooting, see [Services, Costs, and What You Do](PROJECT_GUIDE.md). The technical reference below is retained for setup and maintenance.
 
 ## Technical Reference
 
