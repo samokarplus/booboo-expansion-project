@@ -4,7 +4,7 @@ Deployment snapshot and prices checked: **October 8, 2026**. All schedules use *
 
 ## TL;DR
 
-**Anya uploads the original to YouTube. The Mac makes clips, and Post for Me publishes them to TikTok/Shorts. For Spotify, code prepares the MP3 and details; a browser-assisted dashboard upload has now published one real episode. Spotify still hosts the show. GitHub stores the code and instructions.**
+**Anya uploads the original to YouTube. The Mac makes clips, and Post for Me publishes them to TikTok/Shorts. Spotify preparation now defaults to full video MP4 and details; dashboard uploads still need assistance. The existing live episode remains audio until replaced with video. Spotify still hosts the show. GitHub stores the code and instructions.**
 
 **Expected service cost at current small usage: about $10/month, plus the existing ChatGPT Plus subscription (Codex).** The $10 is Post for Me. Cloudflare should currently fit its free allowances. Spotify, YouTube, TikTok, and this GitHub repository add no required publishing subscription for this setup. This is an estimate before taxes, not a complete account invoice or spending cap.
 
@@ -16,7 +16,7 @@ The issue is the selected hosting method. Our custom RSS route automatically dis
 
 | Path | Publishing workflow | Monetization implications |
 | --- | --- | --- |
-| Keep Spotify hosting | Code prepares audio/copy; a real dashboard upload has succeeded. Unattended repetition is not yet implemented | Preserves the hosting requirement for applying to Spotify's program; audience/location/content eligibility still applies |
+| Keep Spotify hosting | Code now prepares full video/copy; an audio dashboard upload has succeeded. Unattended repetition is not yet implemented | Preserves the hosting requirement; eligible video adds Premium video revenue opportunities |
 | Use our Cloudflare RSS feed | Code can publish full audio automatically; Spotify imports the connected feed | The redirect warning removes this show's Spotify-hosted ads eligibility; external sponsorship income is separate |
 | Use an approved Spotify integration partner | Depends on that provider's supported automation and pricing | Some partners support eligible video monetization; not every external host does |
 
@@ -91,7 +91,7 @@ Workers Free allows 100,000 requests per day across the account. Hitting the Fre
 | Full YouTube episode | The source for everything | Finds the upload after it is published | Record/edit the original, upload it, choose title/description and visibility |
 | TikTok `@pursuitthepod` | Auto-posting enabled | Selects moments, edits/captions/checks clips and schedules up to 3/day at 9 AM, 3 PM and 9 PM | Maintain account connection; review quality/results; respond to comments |
 | YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled | Prepares approved clips and schedules up to 3/week, Mon/Wed/Fri at 5 PM | Maintain connection; optionally select the full episode as Related video in YouTube Studio |
-| Spotify | Signed in; real episode published directly; Spotify hosting preserved | Prepares audio and copy; the browser-assisted upload has succeeded | Dashboard upload is still required per episode until unattended repetition is implemented; do not redirect hosting |
+| Spotify | Signed in; real audio episode published; Spotify hosting preserved | Prepares full video and copy; MP3 is an explicit fallback | Dashboard upload/replacement is required until unattended repetition is implemented; do not redirect hosting |
 | Google Drive review copies | Optional delivery enabled and test previously verified | Delivers up to 3 approved clips and posting text for each new episode; cleans tool-owned copies after 14 days | Review or download if useful; reauthorize Google if needed. Manual posting from Drive is optional |
 | Instagram | Not established here as an active automatic destination | Code supports a later account-connection workflow | Connect and verify the intended account before adding automated Reels |
 
@@ -112,9 +112,9 @@ flowchart TD
     E --> F[TikTok]
     E --> G[YouTube Shorts]
     D --> H[Optional Google Drive review copies]
-    B -. On-demand preparation .-> I[Mac converts full audio to MP3]
+    B -. On-demand preparation .-> I[Mac prepares full video MP4]
     I --> J[Browser-assisted dashboard upload]
-    J --> L[Spotify hosts and publishes audio]
+    J --> L[Spotify hosts and publishes video]
 ```
 
 The social path is scheduled; the Spotify dashboard step is currently assisted, not unattended. Cloudflare is a separate optional RSS route, disconnected from this show to preserve Spotify hosting.
@@ -132,15 +132,15 @@ Remaining engineering work:
 3. Stop and request assistance when a sign-in challenge or unexpected page prevents safe completion. Never guess credentials or silently create another show.
 4. Test that recurring workflow on a future episode before calling it automatic.
 
-For now, code can prepare the audio and posting details, and an assisted dashboard upload can publish an episode. New episodes still need that dashboard step. The current selection rule accepts regular YouTube videos at least six minutes long; it does not classify whether a video is an interview, vlog or solo podcast.
+For now, code prepares full video and posting details, and an assisted dashboard upload can publish an episode. New episodes still need that dashboard step. Video stays local until uploaded to Spotify, not in the Cloudflare audio bucket; this adds local disk space and upload time, not a new hosting subscription. The current selection rule accepts regular YouTube videos at least six minutes long; it does not classify whether a video is an interview, vlog or solo podcast.
 
-**Per-episode confirmation:** prepare with `./autopilot podcast-prepare latest --download`, upload the MP3 and details to the existing show, confirm Published and the correct title/duration, then check public playback. A prepared file or an entry in the Cloudflare ledger is not Spotify publication. Before marking automation complete, a future YouTube upload must pass this whole sequence on a recurring job exactly once, with a saved Spotify episode ID and failures surfaced for attention.
+**Per-episode confirmation:** prepare with `./autopilot podcast-prepare latest --download`, upload `episode.mp4` and details to the existing show, confirm Published, Video and the correct title/duration, then check public video playback. Preparation preserves the full episode and framing, uses H.264/AAC MP4, and validates both tracks and duration. `--format audio` explicitly selects MP3 fallback. For the existing audio episode, replace with video instead of creating a duplicate. A prepared file or Cloudflare ledger entry is not Spotify publication. Before marking automation complete, a future YouTube upload must pass this whole sequence on a recurring job exactly once, with a saved Spotify episode ID and failures surfaced for attention.
 
 [Spotify Setup](SPOTIFY_SETUP.md) retains the external-RSS deployment reference and monetization warning. Do not use its migration steps for the current Spotify-hosted route.
 
 ## Everyday Routine
 
-**Anya:** publish the original episode to YouTube. Review the first outputs and check comments/analytics as desired. Set Related video on Shorts where useful. For the current Spotify-hosted route, each prepared MP3 still needs a dashboard upload until the unattended uploader is built.
+**Anya:** publish the original episode to YouTube. Review outputs and comments/analytics as desired. Set Related video on Shorts where useful. Each full Spotify video still needs a dashboard upload until the unattended uploader is built. Once eligible, complete Spotify's monetization setup; video expands possible revenue streams but does not guarantee earnings.
 
 **Samo:** keep the Mac running with internet and free disk space, maintain the Codex (ChatGPT)/Post for Me sign-ins and account connections, check status when something stalls, and review bills/Cloudflare usage periodically. Keep credentials private; GitHub contains instructions, not the live keys.
 

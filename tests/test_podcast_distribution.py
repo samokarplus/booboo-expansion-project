@@ -131,6 +131,7 @@ class PodcastDistributionTests(unittest.TestCase):
         make_wav(source)
         ready = TEST_DIR / "ready"
         ap.save(ap.CONFIG_FILE, {"podcast": {"mode": "spotify_manual", "ready_dir": str(ready),
+                                             "spotify_format": "audio",
                                              "source_files": {"abc123": str(source)}}})
         ep = {"id": "abc123", "title": "Full episode", "description": "A conversation",
               "url": "https://www.youtube.com/watch?v=abc123"}
@@ -144,6 +145,49 @@ class PodcastDistributionTests(unittest.TestCase):
         self.assertIn(ep["url"], details["description"])
         self.assertEqual(pd.load_state()["episodes"]["abc123"]["status"], "ready_to_upload")
         self.assertFalse(pd.already_published("abc123"))
+
+    def test_video_package_bypasses_external_audio_ledger_without_publishing(self):
+        source = TEST_DIR / "full-video.mkv"
+        subprocess.run([ffmpeg(), "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:rate=25:duration=1",
+                        "-f", "lavfi", "-i", "sine=duration=1", "-c:v", "mpeg4", "-c:a", "aac",
+                        str(source)], check=True, capture_output=True)
+        ready = TEST_DIR / "video-ready"
+        ap.save(ap.CONFIG_FILE, {"podcast": {"mode": "r2", "ready_dir": str(ready),
+                                             "source_files": {"EPISODE0001": str(source)}}})
+        ap.save(pd.ledger_file(), {"episodes": [{"video_id": "EPISODE0001"}]})
+        ep = {"id": "EPISODE0001", "title": "Full video", "url": "https://youtu.be/EPISODE0001"}
+        with patch.object(pd.pc, "fetch_info", return_value=ep), \
+                patch.object(ps, "publish", side_effect=AssertionError("Must not publish RSS")):
+            message = pd.process_episode(ep, pd.load_state(), prepare_only=True)
+        details = json.loads((ready / ep["id"] / "episode.json").read_text())
+        self.assertIn("not published", message)
+        self.assertEqual(details["media_type"], "video")
+        self.assertNotIn("audio_file", details)
+        info = pd.probe_spotify_media(shutil.which("ffprobe") or "/opt/homebrew/bin/ffprobe",
+                                      Path(details["video_file"]))
+        self.assertEqual({s["codec_name"] for s in info["streams"]}, {"h264", "aac"})
+        self.assertAlmostEqual(float(info["format"]["duration"]), 1, delta=0.1)
+        self.assertEqual(pd.load_state()["episodes"][ep["id"]]["status"], "ready_to_upload")
+
+    def test_video_rejects_audio_only_source(self):
+        source = TEST_DIR / "audio-only.wav"
+        make_wav(source)
+        output = TEST_DIR / "should-not-exist.mp4"
+        with self.assertRaises(pd.PodcastError):
+            pd.convert_spotify_video(source, output)
+        self.assertFalse(output.exists())
+        self.assertFalse(output.with_suffix(".tmp.mp4").exists())
+
+    def test_video_preserves_compatible_source_track(self):
+        source = TEST_DIR / "compatible.mp4"
+        subprocess.run([ffmpeg(), "-y", "-f", "lavfi", "-i", "testsrc2=size=320x180:duration=1",
+                        "-f", "lavfi", "-i", "sine=duration=1", "-c:v", "libx264", "-c:a", "aac",
+                        str(source)], check=True, capture_output=True)
+        output = TEST_DIR / "remuxed.mp4"
+        with patch.object(pd.subprocess, "run", wraps=subprocess.run) as run:
+            pd.convert_spotify_video(source, output)
+        encode = next(c.args[0] for c in run.call_args_list if "-movflags" in c.args[0])
+        self.assertEqual(encode[encode.index("-c:v") + 1], "copy")
 
     def test_ready_package_does_not_block_later_pending_episode(self):
         config = ap.load(ap.CONFIG_FILE, {})

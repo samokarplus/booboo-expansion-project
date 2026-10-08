@@ -196,6 +196,53 @@ def convert_mp3(source, out_path, bitrate=None):
     return out_path
 
 
+def probe_spotify_media(ffprobe, path):
+    result = subprocess.run([ffprobe, "-v", "error", "-show_streams", "-show_format",
+                             "-of", "json", str(path)], capture_output=True, text=True, timeout=60)
+    if result.returncode:
+        raise PodcastError("Could not inspect Spotify media: " + result.stderr[-500:])
+    return json.loads(result.stdout)
+
+
+def convert_spotify_video(source, out_path):
+    """Prepare full-length H.264/AAC MP4, without cropping or making a Short."""
+    ffmpeg, ffprobe = pc.find_ffmpeg()
+    out_path = Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = out_path.with_suffix(".tmp.mp4")
+    try:
+        info = probe_spotify_media(ffprobe, source)
+        if not any(s.get("codec_type") == "audio" for s in info["streams"]):
+            raise PodcastError("Spotify video needs a source with both video and audio.")
+        # Preserve compatible source video; normalize other codecs for Spotify.
+        video = next(s for s in info["streams"] if s["codec_type"] == "video")
+        copy_video = video.get("codec_name") == "h264" and video.get("pix_fmt") == "yuv420p"
+        encoding = ["-c:v", "copy"] if copy_video else [
+            "-c:v", "libx264", "-preset", "fast", "-crf", "18", "-pix_fmt", "yuv420p"]
+        command = [ffmpeg, "-y", "-i", str(source), "-map", "0:v:0", "-map", "0:a:0",
+                   *encoding, "-c:a", "aac", "-b:a", "192k", "-ac", "2", "-ar", "48000",
+                   "-movflags", "+faststart", str(tmp)]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=12 * 3600)
+        if result.returncode or not tmp.exists() or tmp.stat().st_size < 1024:
+            raise PodcastError("FFmpeg could not create Spotify video: " + result.stderr[-500:])
+        prepared = probe_spotify_media(ffprobe, tmp)
+        codecs = {s["codec_type"]: s.get("codec_name") for s in prepared["streams"]}
+        duration = float(prepared["format"]["duration"])
+        original_duration = float(info["format"]["duration"])
+        if codecs.get("video") != "h264" or codecs.get("audio") != "aac":
+            raise PodcastError("Spotify video must contain H.264 video and AAC audio.")
+        if duration <= 0 or abs(duration - original_duration) > max(1, original_duration * 0.001):
+            raise PodcastError("Spotify video duration differs from the full source episode.")
+        if duration > 12 * 3600 or tmp.stat().st_size > 60_000_000_000:
+            raise PodcastError("Spotify video exceeds the supported 12-hour or 60-GB limit.")
+        tmp.replace(out_path)
+        return out_path
+    except (pc.Fail, ValueError, KeyError, StopIteration, subprocess.TimeoutExpired) as exc:
+        raise PodcastError(f"Could not validate full Spotify video: {exc}") from exc
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 def public_dir():
     return Path(setting("public_dir", PUBLIC_DIR_DEFAULT)).expanduser()
 
@@ -310,28 +357,33 @@ def remember_published(ep, result, mp3):
     ap.save(ledger_file(), ledger)
 
 
-def prepare_spotify_package(ep, mp3):
+def prepare_spotify_package(ep, media):
     folder = Path(setting("ready_dir", Path.home() / "Desktop" / "PURSUIT_SPOTIFY_READY")).expanduser() / ep["id"]
     folder.mkdir(parents=True, exist_ok=True)
-    target = folder / "episode.mp3"
-    shutil.copy2(mp3, target)
+    is_video = Path(media).suffix.lower() == ".mp4"
+    target = folder / ("episode.mp4" if is_video else "episode.mp3")
+    shutil.copy2(media, target)
     description = clean_description(ep.get("description")) + f"\n\nYouTube version: {ep['url']}"
     details = {"video_id": ep["id"], "title": ep["title"], "description": description,
                "explicit": truthy(setting("explicit", False)), "source_url": ep["url"],
-               "status": "ready_to_upload", "audio_file": str(target)}
+               "status": "ready_to_upload", "media_type": "video" if is_video else "audio",
+               "media_file": str(target), "video_file" if is_video else "audio_file": str(target)}
     ap.save(folder / "episode.json", details)
     (folder / "POSTING_INFO.txt").write_text(
         f"TITLE\n{ep['title']}\n\nDESCRIPTION\n{description}\n\n"
         f"EXPLICIT\n{'Yes' if details['explicit'] else 'No'}\n\n"
         "NEXT STEP\nOpen https://creators.spotify.com/ and choose your PURSUIT show.\n"
-        "Create a new episode, upload episode.mp3, copy the title and description,\n"
+        f"Upload {target.name}, copy the title and description. If this episode already\n"
+        "exists, update that episode instead of creating a duplicate.\n"
         "review the details, then publish. This package has not been uploaded or published.\n",
         encoding="utf-8")
-    return {"provider": "spotify_manual", "package_dir": str(folder), "audio_file": str(target)}
+    return {"provider": "spotify_manual", "package_dir": str(folder),
+            "media_type": details["media_type"], "media_file": str(target),
+            "video_file" if is_video else "audio_file": str(target)}
 
 
-def process_episode(ep, state, dry_run=False, allow_download=False, prepare_only=False):
-    if already_published(ep["id"]):
+def process_episode(ep, state, dry_run=False, allow_download=False, prepare_only=False, media_format=None):
+    if not prepare_only and already_published(ep["id"]):
         state["episodes"][ep["id"]] = episode_record(ep, "published", note="already in podcast ledger")
         ap.save(state_file(), state)
         return f"Podcast: already published {ep['title']}"
@@ -343,6 +395,18 @@ def process_episode(ep, state, dry_run=False, allow_download=False, prepare_only
         source = source_media(ep, work, allow_download=allow_download)
         state["episodes"][ep["id"]] = episode_record(ep, "source_ready", source=str(source))
         ap.save(state_file(), state)
+        mode = "spotify_manual" if prepare_only else setting("mode", "r2")
+        selected_format = media_format or setting("spotify_format", "video")
+        if mode == "spotify_manual" and selected_format == "video":
+            video = convert_spotify_video(source, work / "spotify-episode.mp4")
+            if dry_run:
+                return f"Spotify dry-run: prepared video {ep['title']} -> {video}"
+            result = prepare_spotify_package(ep, video)
+            state["episodes"][ep["id"]] = episode_record(ep, "ready_to_upload", **result)
+            ap.save(state_file(), state)
+            return f"Spotify: video ready to upload (not published): {result['package_dir']}"
+        if mode == "spotify_manual" and selected_format != "audio":
+            raise PodcastError("Spotify format must be video or audio.")
         mp3 = work / (pc.slugify(ep["title"], 80) + ".mp3")
         if not mp3.exists():
             convert_mp3(source, mp3)
@@ -350,7 +414,6 @@ def process_episode(ep, state, dry_run=False, allow_download=False, prepare_only
         ap.save(state_file(), state)
         if dry_run:
             return f"Podcast dry-run: converted {ep['title']} -> {mp3}"
-        mode = "spotify_manual" if prepare_only else setting("mode", "r2")
         if mode == "r2":
             import podcast_storage
             result = podcast_storage.publish(ep, mp3)
@@ -460,6 +523,8 @@ def add_cli(sub):
     p.add_argument("episode", nargs="?", default="latest", help="latest or a YouTube episode URL")
     p.add_argument("--source", help="local full-episode audio/video export")
     p.add_argument("--download", action="store_true", help="retrieve your episode using yt-dlp")
+    p.add_argument("--format", choices=["video", "audio"], default="video",
+                   help="Spotify dashboard package format (default: full video MP4)")
     r = sub.add_parser("podcast-run", help="prepare one new full episode; publish only in an explicitly configured host mode")
     r.add_argument("--dry-run", action="store_true")
     r.add_argument("--once", action="store_true", help="run even if podcast automation is off")
@@ -510,7 +575,8 @@ def dispatch_locked(args):
             register_source(ep["id"], args.source)
         print(process_episode(ep, load_state(), dry_run=getattr(args, "dry_run", False),
                               allow_download=getattr(args, "download", False),
-                              prepare_only=args.cmd == "podcast-prepare"))
+                              prepare_only=args.cmd == "podcast-prepare",
+                              media_format=getattr(args, "format", None)))
     elif args.cmd == "podcast-run":
         print(run(args))
     elif args.cmd == "podcast-source":

@@ -2,7 +2,7 @@
 
 ## Quick Read
 
-PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikToks, YouTube Shorts, and full podcast audio. It runs on the Mac; GitHub is the code and instruction manual.
+PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikToks, YouTube Shorts, and full Spotify video packages. It runs on the Mac; GitHub is the code and instruction manual.
 
 **Monthly budget: about $10 plus your existing ChatGPT Plus subscription (used by Codex).** Cloudflare is expected to cost $0 at current usage, but storage/request overages can be billed. Taxes, optional upgrades and normal computer/internet costs are separate. Your ChatGPT plan price has not been verified here.
 
@@ -13,11 +13,11 @@ PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikT
 | Codex CLI | Selects and checks short moments | Existing ChatGPT Plus subscription |
 | Post for Me | Schedules and publishes TikToks and Shorts | $10 baseline |
 | Cloudflare | Stores full MP3s and serves our RSS episode list | $0 expected initially; limits apply |
-| Spotify | Hosts the show and its published audio for listeners | $0 required |
+| Spotify | Hosts full video/audio episodes and eligible monetization | $0 required |
 | Google Drive | Optional review copies of Shorts | $0 extra with sufficient storage |
 | GitHub | Stores code, history and these instructions | $0 extra required |
 
-**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled. **YouTube-to-Spotify is not automatic yet:** one real episode is live, but each new MP3 still needs a dashboard upload. Spotify hosting is preserved for monetization eligibility, not guaranteed earnings. The test episode is deleted; Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
+**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled. Spotify preparation now defaults to full video MP4; **dashboard uploads are not automatic yet**. The existing live episode is still audio until its video is uploaded. Spotify hosting preserves monetization eligibility, not guaranteed earnings. Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
 
 Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing), [Cloudflare](https://developers.cloudflare.com/r2/pricing/). Detailed costs, schedules, setup and responsibilities are below.
 
@@ -55,7 +55,7 @@ flowchart TD
     D --> E[TikTok]
     D --> F[YouTube Shorts]
     C --> G[Optional Drive review copies]
-    B -. On-demand preparation .-> H[Full MP3 and episode details]
+    B -. On-demand preparation .-> H[Full video MP4 and episode details]
     H --> I[Browser-assisted upload to Spotify dashboard]
     I --> J[Spotify hosts and publishes the episode]
 ```
@@ -99,7 +99,7 @@ The sections below cover installation, manual commands, account connections, tes
 - Approximately 2 GB for the Python environment and Whisper model, plus temporary space while an episode is processed
 - For automatic publishing: your own Post for Me account/API key, the intended TikTok account, and the intended connected YouTube channel
 - For optional Drive review delivery: a Google OAuth Desktop client with Drive access and a shared Drive folder
-- For the current Spotify route: the existing Spotify for Creators show and a prepared MP3; unattended uploads are not implemented. Cloudflare is optional external-RSS reference only; see [Spotify Setup](SPOTIFY_SETUP.md)
+- For the current Spotify route: the existing Spotify for Creators show and a prepared full-video MP4; unattended uploads are not implemented. Cloudflare is optional audio RSS reference only; see [Spotify Setup](SPOTIFY_SETUP.md)
 - Instagram is optional; if automatic Reels publishing is added later, connect and verify the intended eligible Instagram account before enabling it
 
 The core clipping workflow has no per-episode API bill beyond services you already use. Autopilot posting requires a Post for Me plan; pricing can change, so check its current pricing before subscribing. Codex usage is subject to your ChatGPT plan's Codex limits (see *AI provider* below).
@@ -316,11 +316,13 @@ The Drive path is designed to be unattended but fail-safe: one batch per episode
 
 **Working now:** the [real 8:48 episode](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) is Published; the 27-second test is deleted. Code prepared the full MP3 and episode details, then a browser-assisted dashboard upload published it. Spotify still hosts the show; no redirect was applied.
 
-**Not automatic yet:** a new YouTube episode does not trigger a Spotify publication. Prepare its MP3 with `./autopilot podcast-prepare latest --download`, upload it and its copy in the existing Spotify dashboard, then confirm Published and public playback. The current length filter accepts regular videos at least six minutes long; it does not identify podcast content by genre.
+**Video preparation:** `./autopilot podcast-prepare latest --download` now makes `episode.mp4` (full-length H.264/AAC, original framing) and posting details. Compatible video is preserved; other codecs are converted and duration is checked. Use `--format audio` only for an MP3 fallback. Files land in `~/Desktop/PURSUIT_SPOTIFY_READY/VIDEO_ID/`. [Spotify video specs](https://support.spotify.com/us/creators/article/video-specs/).
+
+**Not automatic yet:** a new YouTube episode does not trigger a Spotify publication. Upload the prepared MP4 to the existing show's dashboard, then confirm Published, Video and public playback. For the already-published audio episode, use its replace-with-video workflow instead of creating a duplicate. The current length filter accepts regular videos at least six minutes long; it does not identify podcast content by genre.
 
 **Before calling it hands-off:** build and schedule a reliable dashboard uploader, add duplicate/retry checks and login-interruption handling, then verify a future YouTube upload reaches Spotify exactly once. No recurring Spotify job or upload frequency is enabled today.
 
-**Monetization:** keeping Spotify hosting preserves that eligibility requirement; Anya must still qualify, apply and complete payouts in Spotify's Monetize section. Eligible audio can earn ad revenue; Premium video revenue requires video, not this MP3. Publishing alone does not start earnings. See [Spotify's current requirements](https://support.spotify.com/us/creators/article/spotify-partner-program/).
+**Monetization:** keeping Spotify hosting preserves that eligibility requirement; Anya must still qualify, apply and complete payouts/ad-break setup in Spotify's Monetize section. Eligible video can earn ads and Premium video revenue; MP3 fallback cannot earn Premium video revenue. Publishing alone does not start earnings. See [Spotify's current requirements](https://support.spotify.com/us/creators/article/spotify-partner-program/).
 
 The [Cloudflare RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) works independently but is disconnected and its publishing branch is OFF. Do not redirect this show to it: Spotify's warning removes Spotify-hosted ads eligibility. [Next steps](PROJECT_GUIDE.md#current-spotify-publication-and-next-steps) explain the chosen route; [Spotify Setup](SPOTIFY_SETUP.md) retains optional external-RSS reference only.
 
