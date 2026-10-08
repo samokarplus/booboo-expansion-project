@@ -4,7 +4,7 @@ Deployment snapshot and prices checked: **October 8, 2026**. All schedules use *
 
 ## TL;DR
 
-**Anya uploads the original to YouTube. The Mac makes clips, and Post for Me publishes them to TikTok/Shorts. Spotify preparation now defaults to full video MP4 and details; dashboard uploads still need assistance. The existing live episode remains audio until replaced with video. Spotify still hosts the show. GitHub stores the code and instructions.**
+**Anya uploads the original to YouTube. The Mac makes clips, and Post for Me publishes them to TikTok/Shorts. Spotify preparation produces full video MP4 and details; uploads still need assistance. The latest episode is confirmed Published as Video, and the 55-episode talk-catalog backfill is in progress. Spotify still hosts the show. GitHub stores the code and instructions.**
 
 **Expected service cost at current small usage: about $10/month, plus the existing ChatGPT Plus subscription (Codex).** The $10 is Post for Me. Cloudflare should currently fit its free allowances. Spotify, YouTube, TikTok, and this GitHub repository add no required publishing subscription for this setup. This is an estimate before taxes, not a complete account invoice or spending cap.
 
@@ -16,7 +16,7 @@ The issue is the selected hosting method. Our custom RSS route automatically dis
 
 | Path | Publishing workflow | Monetization implications |
 | --- | --- | --- |
-| Keep Spotify hosting | Code now prepares full video/copy; an audio dashboard upload has succeeded. Unattended repetition is not yet implemented | Preserves the hosting requirement; eligible video adds Premium video revenue opportunities |
+| Keep Spotify hosting | Full video preparation and assisted dashboard publication verified. Unattended repetition is not yet implemented | Preserves the hosting requirement; eligible video adds Premium video revenue opportunities |
 | Use our Cloudflare RSS feed | Code can publish full audio automatically; Spotify imports the connected feed | The redirect warning removes this show's Spotify-hosted ads eligibility; external sponsorship income is separate |
 | Use an approved Spotify integration partner | Depends on that provider's supported automation and pricing | Some partners support eligible video monetization; not every external host does |
 
@@ -24,7 +24,7 @@ Spotify currently lists hosting, audience, episode and market requirements for i
 
 **Current recommendation:** keep Spotify hosting while Anya decides about monetization. Do not apply the permanent redirect or turn on the Cloudflare publishing branch merely to finish setup. The existing code, cover and verified MP3 remain usable; the work is not lost.
 
-**Anya's monetization steps:** open Spotify's Monetize section, confirm her location/account type, track eligibility and apply when eligible. After approval, complete payouts and configure ad breaks. Current application requirements include an eligible legal address, Spotify hosting, 3 published episodes, 2,000 consumption hours and 1,000 audience count in the last 30 days. These rules can change; the dashboard is authoritative. Eligible audio can earn ad revenue, but Premium video revenue requires video. The current MP3 does not earn Premium video revenue. [Official requirements and payout steps](https://support.spotify.com/us/creators/article/spotify-partner-program/).
+**Anya's monetization steps:** open Spotify's Monetize section, confirm her location/account type, track eligibility and apply when eligible. After approval, complete payouts and configure ad breaks. Current application requirements include an eligible legal address, Spotify hosting, 3 published episodes, 2,000 consumption hours and 1,000 audience count in the last 30 days. These rules can change; the dashboard is authoritative. Eligible video can earn ad and Premium video revenue; an MP3 fallback cannot earn Premium video revenue. [Official requirements and payout steps](https://support.spotify.com/us/creators/article/spotify-partner-program/).
 
 ## What Each Thing Does
 
@@ -91,7 +91,7 @@ Workers Free allows 100,000 requests per day across the account. Hitting the Fre
 | Full YouTube episode | The source for everything | Finds the upload after it is published | Record/edit the original, upload it, choose title/description and visibility |
 | TikTok `@pursuitthepod` | Auto-posting enabled | Selects moments, edits/captions/checks clips and schedules up to 3/day at 9 AM, 3 PM and 9 PM | Maintain account connection; review quality/results; respond to comments |
 | YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled | Prepares approved clips and schedules up to 3/week, Mon/Wed/Fri at 5 PM | Maintain connection; optionally select the full episode as Related video in YouTube Studio |
-| Spotify | Signed in; real audio episode published; Spotify hosting preserved | Prepares full video and copy; MP3 is an explicit fallback | Dashboard upload/replacement is required until unattended repetition is implemented; do not redirect hosting |
+| Spotify | Full video publication confirmed; catalog backfill in progress; Spotify hosting preserved | Prepares full video and copy; MP3 is an explicit fallback | Future dashboard uploads remain assisted until unattended repetition is implemented; do not redirect hosting |
 | Google Drive review copies | Optional delivery enabled and test previously verified | Delivers up to 3 approved clips and posting text for each new episode; cleans tool-owned copies after 14 days | Review or download if useful; reauthorize Google if needed. Manual posting from Drive is optional |
 | Instagram | Not established here as an active automatic destination | Code supports a later account-connection workflow | Connect and verify the intended account before adding automated Reels |
 
@@ -123,7 +123,7 @@ The social path is scheduled; the Spotify dashboard step is currently assisted, 
 
 **Backfill in progress:** Samo authorized publishing the podcast/talk catalog as full videos, excluding race vlogs and the EMT exam video. Preparation is saved per YouTube ID and done in bounded batches with a disk-space floor; successful packages keep their video/details, while only the tool's scratch downloads/conversions are removed. The queue retains exclusions, review holds and errors across restarts. Existing audio publications need video replacement, not duplicate episodes. Only a confirmed Spotify Published entry is recorded as live. No claim is made that the catalog backfill or recurring uploader is finished.
 
-Completed: creator sign-in, full MP3 preparation and a successful dashboard upload of [How to be More Consistent Than 99% of People](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH). Spotify confirms Published, Audio, 8:48. The 27-second "Delete this later" test was deleted with permission; the real episode is the sole remaining dashboard entry. Spotify hosting and monetization settings were not changed.
+Completed: creator sign-in, full-video preparation and replacement of [How to be More Consistent Than 99% of People](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) on its existing episode ID. Spotify confirms Published, Video, 8:48. The 27-second test is deleted, and older talk videos are being published through the dashboard. The target is 55 talk episodes from 60 regular channel videos; five vlogs/non-podcast videos are excluded. Spotify hosting and monetization settings were not changed.
 
 The separate Cloudflare server, cover, audio and RSS feed also work, but that feed is not connected to Spotify. Its automatic publishing switch remains OFF. There is no required RSS redirect for the direct dashboard route.
 

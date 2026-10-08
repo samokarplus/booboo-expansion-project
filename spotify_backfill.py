@@ -93,7 +93,8 @@ def prepare(rows, limit):
             source = work / "backfill-source.mp4"
             if not source.exists():
                 formats = ["bv[height<=1080][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=1080][ext=mp4]/bv[height<=1080]+ba/b",
-                           "bv*[height<=1080]+ba/b"]
+                           "bv*[height<=1080]+ba/b",
+                           "bv[height<=1080][protocol^=m3u8]+ba[protocol^=m3u8]/b[protocol^=m3u8]"]
                 for selection in formats:
                     command = ["yt-dlp", "--force-ipv4", "--no-playlist", "--no-warnings", "-f", selection,
                                "--merge-output-format", "mp4", "--ffmpeg-location", str(Path(ffmpeg).parent),

@@ -17,7 +17,7 @@ PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikT
 | Google Drive | Optional review copies of Shorts | $0 extra with sufficient storage |
 | GitHub | Stores code, history and these instructions | $0 extra required |
 
-**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled. Spotify preparation now defaults to full video MP4; **dashboard uploads are not automatic yet**. The existing live episode is still audio until its video is uploaded. Spotify hosting preserves monetization eligibility, not guaranteed earnings. Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
+**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled. Spotify now has full videos, and an assisted 55-episode talk-catalog backfill is underway; **future dashboard uploads are not automatic yet**. Spotify hosting preserves monetization eligibility, not guaranteed earnings. Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
 
 Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing), [Cloudflare](https://developers.cloudflare.com/r2/pricing/). Detailed costs, schedules, setup and responsibilities are below.
 
@@ -34,7 +34,7 @@ Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing)
 | Original YouTube episode | Human upload; source for the program | Record/edit and upload the original episode |
 | TikTok `@pursuitthepod` | Automatic posting enabled; up to 3/day at 9 AM, 3 PM and 9 PM Denver time | Maintain account connection and review results; no routine clip upload |
 | YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5 PM Denver time | Maintain connection; set Related video in YouTube Studio when wanted |
-| Spotify | Real 8:48 episode published directly in the existing Spotify-hosted show; unattended uploads not built | Use the dashboard upload flow for now; no hosting redirect needed |
+| Spotify | Latest 8:48 episode confirmed Published as Video; assisted talk-catalog backfill underway | No hosting redirect needed; future uploads still need the assisted dashboard flow |
 | Google Drive | Optional review delivery enabled; previous test verified | Review/download copies if useful; refresh Google login if it expires |
 
 Schedules are ceilings, not quotas: unsuitable or missing clips leave empty slots. The Mac must be awake and online to prepare new content. Clips already submitted to Post for Me can publish while it is off; existing Cloudflare audio remains available too.
@@ -60,7 +60,7 @@ flowchart TD
     I --> J[Spotify hosts and publishes the episode]
 ```
 
-**Published directly on Spotify:** [How to be More Consistent Than 99% of People](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH), 8:48. The dashboard confirms Published. This was a browser-assisted upload, not a completed unattended uploader. Spotify hosting was preserved. The separate [Cloudflare RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) is online but is not connected to this show; redirecting to it is paused because of the monetization tradeoff.
+**Published directly on Spotify:** [How to be More Consistent Than 99% of People](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH), 8:48, now confirmed Published as Video without changing its episode ID. Catalog videos are also being backfilled. These are assisted dashboard uploads, not a completed unattended uploader. Spotify hosting was preserved. The separate [Cloudflare RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) is online but is not connected to this show.
 
 ## What Each Thing Does
 
@@ -314,7 +314,7 @@ The Drive path is designed to be unattended but fail-safe: one batch per episode
 
 ## Spotify: Current Publication and Automation
 
-**Working now:** the [real 8:48 episode](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) is Published; the 27-second test is deleted. Code prepared the full MP3 and episode details, then a browser-assisted dashboard upload published it. Spotify still hosts the show; no redirect was applied.
+**Working now:** the [real 8:48 episode](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) is confirmed Published as Video, replacing its initial audio on the same episode ID; the test is deleted. Assisted catalog uploads are in progress. Spotify still hosts the show; no redirect was applied.
 
 **Video preparation:** `./autopilot podcast-prepare latest --download` now makes `episode.mp4` (full-length H.264/AAC, original framing) and posting details. Compatible video is preserved; other codecs are converted and duration is checked. Use `--format audio` only for an MP3 fallback. Files land in `~/Desktop/PURSUIT_SPOTIFY_READY/VIDEO_ID/`. [Spotify video specs](https://support.spotify.com/us/creators/article/video-specs/).
 
