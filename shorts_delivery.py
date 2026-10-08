@@ -295,7 +295,7 @@ def gather_shorts(ep, n, lock_held=False):
         if all((Path(found["ep_dir"]) / c["file"]).exists() for c in chosen):
             return found["meta"], found["ep_dir"], chosen, None
     # Not processed yet, or chosen MP4s were cleaned up after posting: run the normal render + QC.
-    # Transcript and Claude's analysis are cached on disk, so this only (re)renders what's missing.
+    # Transcript and the AI's analysis are cached on disk, so this only (re)renders what's missing.
     def work():
         rec = {"rendered_by_autopilot": True}            # a throwaway record: autopilot state isn't touched
         try:
