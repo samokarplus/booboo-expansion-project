@@ -1,143 +1,61 @@
 # Booboo Expansion Project
 
+PURSUIT's episode distribution system. Anya uploads the original episode to YouTube; code running on the Mac prepares short social videos and full podcast audio.
+
 ## TL;DR
 
-A local **podcast-to-short-form content engine** for PURSUIT. It watches the podcast's YouTube channel, transcribes episodes, uses Claude to find standalone moments, renders captioned vertical clips, and checks their quality. The current local deployment schedules approved clips through Post for Me to **TikTok @pursuitthepod, up to 3 posts per day**, and to the connected **[PURSUIT with Anya Postnikov YouTube channel (@AnyaPostnikov)](https://www.youtube.com/@AnyaPostnikov), up to 3 Shorts per week**.
+**Expected service budget: about $10/month, plus the existing Claude subscription.** Post for Me is the $10 baseline. Cloudflare should currently fit its free allowances; it can charge for R2 overages. Spotify, YouTube, TikTok and this GitHub repository add no required publishing subscription in this setup. This estimate excludes taxes, hardware/internet, optional extras and other personal subscriptions. [Post for Me pricing](https://www.postforme.dev/pricing), [Cloudflare pricing](https://developers.cloudflare.com/r2/pricing/).
 
-**YouTube automatic publishing is now enabled:** Monday, Wednesday, and Friday at **5 PM America/Denver**. The destination is pinned to channel ID `UCkw_7bkF1qSRrupIvN4SIAg`. The first Short is confirmed as scheduled in Post for Me for **Friday, October 9, 2026 at 5 PM Denver time**; that is a scheduling confirmation, not a claim it has already published.
+**Who does what:** Anya makes and uploads the original. The Mac edits clips and converts audio. Post for Me schedules TikTok/Shorts. Cloudflare stores and serves full MP3s and our episode list. Spotify imports that list after its one-time connection. GitHub stores the code and instructions; it does not run the daily work.
 
-TikTok uses separate **9 AM, 3 PM, and 9 PM Denver-time** slots and a **12-clip target buffer**. YouTube maintains its own weekly schedule and duplicate-protection ledger. These are ceilings, not quotas: slots remain empty when no eligible clip is available. New episodes get priority. Submitted posts can publish from Post for Me's cloud while the Mac is off; the Mac must be on to generate, check, and submit more clips. Google Drive review delivery remains an optional, separate workflow. TikTok/Instagram captions link viewers to @AnyaPostnikov on YouTube.
+**Where we are, October 8, 2026:**
 
-An automated podcast growth system built for **PURSUIT**.
+| Destination | Current live Mac setting | What you do |
+| --- | --- | --- |
+| Original YouTube episode | Human upload; source for the program | Record/edit and upload the original episode |
+| TikTok `@pursuitthepod` | Automatic posting enabled; up to 3/day at 9 AM, 3 PM and 9 PM Denver time | Maintain account connection and review results; no routine clip upload |
+| YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5 PM Denver time | Maintain connection; set Related video in YouTube Studio when wanted |
+| Spotify | First real audio/feed verified; Spotify connection pending; recurring publication OFF | Finish creator sign-in, connect the existing show to our feed, verify import, then enable automation |
+| Google Drive | Optional review delivery enabled; previous test verified | Review/download copies if useful; refresh Google login if it expires |
 
-**Live TikTok:** [@pursuitthepod](https://www.tiktok.com/@pursuitthepod)
+Schedules are ceilings, not quotas: unsuitable or missing clips leave empty slots. The Mac must be awake and online to prepare new content. Clips already submitted to Post for Me can publish while it is off; existing Cloudflare audio remains available too.
 
-## What I Built
+**Read [Services, Costs, and What You Do](PROJECT_GUIDE.md)** for the detailed human guide: every service's purpose, monthly cost estimates, each platform's manual steps, what happens when the Mac is off, and the remaining Spotify setup. [Spotify Setup](SPOTIFY_SETUP.md) contains the technical account/deployment instructions.
 
-This is a **local autonomous podcast-to-short-form content engine**. The human creates the long-form podcast; the system handles essentially the entire repetitive distribution workflow from episode discovery to publishing.
+For the earlier provider/security background, see [Post for Me and Connecting YouTube](POSTFORME.md).
 
-In plain English: **publish a podcast episode, and the Mac can turn it into short-form social content without someone manually finding moments, editing clips, captioning them, maintaining a queue, choosing posting times, or pressing Post.**
+## Monthly Cost Snapshot
 
-The system automatically:
+| Item | Monthly budget |
+| --- | --- |
+| Post for Me | $10 baseline; verify the account invoice |
+| Cloudflare R2 + our Worker | $0 expected at current small usage; free limits apply |
+| Spotify / YouTube / TikTok / GitHub repository | $0 additional required publishing/repository fee |
+| Google Drive review copies | $0 additional while existing storage is sufficient |
+| Claude | Existing subscription; its plan price has not been verified here |
 
-- Detects new PURSUIT YouTube episodes and works through the existing back catalog.
-- Downloads and transcribes episodes locally with Whisper.
-- Uses Claude to find coherent, standalone moments such as advice, stories, arguments, or complete thoughts rather than arbitrary timestamp windows.
-- Renders polished 9:16 vertical clips with speaker framing, burned captions, and normalized audio.
-- Runs automated technical and editorial quality control and rejects weak, incomplete, or awkward clips.
-- Tracks source episodes and time ranges to avoid recycling the same moments.
-- Maintains its own approved-content buffer and replenishes it from the back catalog.
-- Gives newly published podcast episodes priority over older material.
-- Schedules and publishes approved clips through Post for Me.
-- Targets up to **three TikTok posts per day** at **9 AM, 3 PM, and 9 PM America/Denver**. Three is a ceiling, not a quota: if nothing good passes QC, the slot is skipped.
-- Automatically schedules **three YouTube Shorts per week** to the connected **PURSUIT with Anya Postnikov (@AnyaPostnikov)** channel, on **Monday, Wednesday, and Friday at 5 PM America/Denver**.
-- Checks for new episodes six times per day and works toward a **12-clip approved-buffer target**.
-- Recovers safely from interrupted processing, Mac sleep/restarts, network failures, and ambiguous publishing responses.
-- For each **new** PURSUIT episode, automatically prepares up to **3** strong, non-overlapping YouTube Shorts after the normal processing/QC pass and uploads the finished 1080x1920 MP4s to the shared `PURSUIT - Shorts Ready to Post` Google Drive folder.
-- Generates a `POSTING_INFO.txt` alongside each Shorts batch with ready-to-copy YouTube titles/descriptions and the full-episode link.
-- Keeps weekly YouTube publishing separate from TikTok scheduling. The optional Drive workflow also supports reviewing finished files; Drive sign-in is not required for Post for Me publishing.
-- Catches up on multiple new episodes after Mac sleep/offline time, retries failed Drive deliveries without losing the prepared package, and prevents duplicate batches per episode.
-- Cleans tool-owned Drive delivery files after **14 days** while preserving source/transcript/analysis data and social-production assets.
+R2 currently includes 10 GB-month of Standard storage. At our 160 kbps setting, 100 hours of audio is about 7.2 GB. Storage-only estimates: 500 hours about $0.39/month; 1,000 hours about $0.93/month. Extra requests, small overhead and rounding are additional. Workers Free has a 100,000-request daily limit and can stop serving when exhausted; it is not an unlimited free plan. See the [full budget explanation](PROJECT_GUIDE.md#monthly-costs).
 
-The unattended system also includes production safeguards: automated tests, resumable processing, serialized jobs/locking, atomic state writes, credential validation, pinned social-account identity, duplicate-post protection, API reconciliation, bounded media cleanup, corruption handling, and fail-closed behavior when an upstream service or credential stops working.
+## The Two Publishing Paths
 
-The result is not just a clip maker. It is an **autonomous local social-media pipeline:**
-
-```text
-Long-form PURSUIT podcast
-        -> episode discovery
-        -> local transcription
-        -> AI moment selection
-        -> 9:16 editing + captions + audio/framing
-        -> automated quality control
-        -> approved content buffer
-        -> quality-approved clips
-        -> TikTok: queue + scheduled publishing through Post for Me
-        -> YouTube Shorts: Post for Me -> @AnyaPostnikov -> Mon/Wed/Fri at 5 PM Denver
-        -> Optional review copies: shared Google Drive
-        -> repeat
+```mermaid
+flowchart TD
+    A[Anya uploads a full episode to YouTube] --> B[Our code on the Mac]
+    B --> C[Short clips with captions and quality checks]
+    C --> D[Post for Me schedules posts]
+    D --> E[TikTok]
+    D --> F[YouTube Shorts]
+    C --> G[Optional Drive review copies]
+    B --> H[Full MP3 and RSS episode list]
+    H --> I[Cloudflare stores and serves files]
+    I --> J[Spotify imports the connected feed]
 ```
 
-Unattended publishing is deliberately protected by a one-time controlled live-post gate before auto-posting can be enabled.
+The Spotify branch still needs its final account/feed connection. Our public [RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) already contains **How to be More Consistent Than 99% of People**. That confirms our hosting, not Spotify availability. There is an [existing PURSUIT Spotify show](https://open.spotify.com/show/2EOi7bHXVbBCbYJgXm6fWu); use it rather than creating a duplicate.
 
-```text
-YouTube podcast episode
-        -> detect and download
-        -> transcribe with MLX Whisper
-        -> Claude selects promising moments
-        -> FFmpeg creates 9:16 clips
-        -> captions and audio normalization
-        -> technical and visual quality control
-        -> output routing
-             -> TikTok: Post for Me -> automatic publishing
-             -> YouTube Shorts: Post for Me -> automatic publishing, 3 per week
-             -> Instagram Reels: available as a future Post for Me destination once the intended account is connected/tested
-```
+## Technical Reference
 
-This is a small, local macOS command-line tool. It is not a web app and it does not create social accounts, bypass OAuth, manage comments, or modify existing channel content.
-
-## About Post for Me and Connecting YouTube
-
-[Post for Me](https://www.postforme.dev/) is a hosted social-media publishing service operated by **Day Moon Development LLC**. It gives apps one interface for account connections, video uploads, scheduling, and publishing across **nine platforms**, including TikTok, Instagram, and YouTube. In this project, the Mac does the creative work: finding moments, editing, captioning, and checking clips. Post for Me handles delivery of approved TikTok posts and the weekly YouTube Shorts.
-
-### Who runs it and how established is it?
-
-Day Moon Development was started in **2023** by founders Caleb and Matt, who developed Post for Me from social-media integrations they built for clients. Its [public source repository](https://github.com/DayMoonDevelopment/post-for-me) contains the API, dashboard, and background-job code. As of **October 5, 2026**, GitHub showed **78 stars, 25 forks, and more than 1,100 commits**. These describe its public development footprint, not its number of customers. The official pages reviewed do not publish a verified customer or connected-account count. [Company background](https://www.postforme.dev/day-moon-development) · [Product background](https://www.postforme.dev/about)
-
-### What connecting a YouTube channel means
-
-YouTube connection uses **Google's OAuth authorization process**: the channel owner signs in with Google, chooses the intended account/channel, and reviews the requested permissions on Google's consent screen. The app receives authorization tokens rather than the owner's Google password. Those tokens let the service act within the permissions granted; the exact consent screen matters, since YouTube permissions can include video management, not just uploading. Connecting is a real authorization decision, and does not transfer ownership of the channel. [Google's OAuth explanation and permission scopes](https://developers.google.com/youtube/v3/guides/auth/server-side-web-apps)
-
-Post for Me's [YouTube integration](https://www.postforme.dev/integrations/youtube) supports uploads, scheduling, titles, thumbnails, and public/private/unlisted visibility. Its [privacy policy](https://www.postforme.dev/privacy) says it stores channel identifiers, account metadata, and OAuth tokens; encrypts data in transit and at rest; protects production access with least-privilege roles and mandatory two-factor authentication; and does not sell or rent user information. These are the provider's published commitments.
-
-The owner can disconnect YouTube in Post for Me or revoke its access through [Google Account connections](https://myaccount.google.com/connections). Revocation stops future authorized access; it does not undo videos already published or automatically remove previously shared data. [Google's connection-management guide](https://support.google.com/accounts/answer/13533235)
-
-### How PURSUIT currently uses YouTube
-
-**As of October 7, 2026, automatic YouTube Shorts scheduling is enabled in the local deployment.** Post for Me is connected to **PURSUIT with Anya Postnikov (@AnyaPostnikov)**, pinned by channel ID `UCkw_7bkF1qSRrupIvN4SIAg`. Quality-approved Shorts are scheduled on **Monday, Wednesday, and Friday at 5 PM America/Denver**, independently of TikTok's three-per-day schedule. Up to three Shorts are submitted ahead, and empty slots are skipped. Creating clips happens locally; publishing uses the connected YouTube authorization. Optional Drive review delivery remains available separately.
-
-## What It Does
-
-### Built end-to-end automation
-
-The current local build goes beyond one-off clip generation. It can run as a scheduled, hands-off content engine:
-
-- Works through PURSUIT's existing YouTube back catalog automatically.
-- Checks for new PURSUIT episodes six times per day and gives fresh episodes priority.
-- Uses Claude to select promising, standalone short-form moments.
-- Renders 9:16 clips with captions, framing, and normalized audio.
-- Runs technical, editorial, caption, framing, and audio quality control; weak candidates are rejected rather than posted just to fill a slot.
-- Maintains an internal buffer of approved clips without requiring the user to manage the queue.
-- Processes another back-catalog episode roughly every three hours when the buffer needs content, and pauses backlog work when roughly four days of clips are ready.
-- Targets up to three TikTok posting slots per day at **9 AM, 3 PM, and 9 PM America/Denver**. A slot is skipped when no clip passes QC.
-- Schedules YouTube Shorts independently on **Monday, Wednesday, and Friday at 5 PM America/Denver** to **PURSUIT with Anya Postnikov (@AnyaPostnikov)**.
-- Tracks processed episodes, used time ranges, queued clips, and posts to prevent duplicate content.
-- Uses persistent state, retries, locking, and reconciliation so interruptions, restarts, and ambiguous API failures do not blindly create duplicate posts.
-- Keeps unattended posting OFF until a controlled real post has been confirmed live.
-- Uses verified TikTok and pinned YouTube destinations for unattended publishing. Instagram Reels can be added later through the controlled account-pinning/live-test process. Google Drive review delivery is an optional additional output.
-
-In short:
-
-```text
-PURSUIT old + new YouTube episodes
-        -> scheduled discovery
-        -> transcription
-        -> Claude selects strong unused moments
-        -> vertical render + captions + audio/framing
-        -> quality control
-        -> internal approved buffer
-        -> automatic scheduled publishing
-        -> repeat without daily clip management
-```
-
-- Accepts a YouTube episode URL or detects a new PURSUIT upload.
-- Downloads the source with `yt-dlp`.
-- Transcribes locally with `mlx-whisper`, including word-level timestamps.
-- Asks the Claude Code CLI to find interesting, standalone moments with fast openings and complete endings.
-- Uses FFmpeg and OpenCV to create 1080x1920 H.264/AAC clips, frame the speaker, burn highlighted ASS captions, and normalize audio to -14 LUFS.
-- Handles static-image/audio-only episodes with an audiogram layout.
-- Rejects clips that fail technical, editorial, caption, framing, or audio checks.
-- Can leave finished clips for manual posting, schedule approved TikTok clips and weekly YouTube Shorts through Post for Me, and optionally deliver review copies to Google Drive.
+The sections below cover installation, manual commands, account connections, testing and operation. The live Mac's settings and private files are separate from GitHub. Some earlier Shorts/Drive changes remain local and are not all committed, so the deployment snapshot above is not a claim that a fresh clone contains every live feature. See [GitHub versus the live Mac](PROJECT_GUIDE.md#github-versus-the-live-mac).
 
 ## Requirements
 
@@ -147,9 +65,10 @@ PURSUIT old + new YouTube episodes
 - Approximately 2 GB for the Python environment and Whisper model, plus temporary space while an episode is processed
 - For automatic publishing: your own Post for Me account/API key, the intended TikTok account, and the intended connected YouTube channel
 - For optional Drive review delivery: a Google OAuth Desktop client with Drive access and a shared Drive folder
+- For automatic audio distribution: Cloudflare R2, the included feed server and an existing-show connection in Spotify for Creators; see [Spotify Setup](SPOTIFY_SETUP.md)
 - Instagram is optional; if automatic Reels publishing is added later, connect and verify the intended eligible Instagram account before enabling it
 
-In the current deployment, Claude is used through the logged-in Claude Code subscription rather than a separately configured Anthropic API key, so the pipeline consumes normal Claude plan usage rather than a separate per-call API bill. Local Whisper/FFmpeg processing and Google Drive API delivery add no per-episode software charge; Drive files use the account's normal storage. TikTok autopilot uses Post for Me, which is the main incremental recurring service cost in this deployment (currently $10/month for the account in use; pricing can change).
+The current Mac uses the logged-in Claude Code subscription for clip selection/QC, rather than a separately configured Anthropic API key. Media processing is local. See [Monthly Costs](PROJECT_GUIDE.md#monthly-costs) for the service budget, limits and assumptions; the actual Claude plan and all account invoices have not been audited here.
 
 ## Installation
 
@@ -193,11 +112,11 @@ Running the same command after an interruption resumes from cached work. Complet
 
 ## Autopilot Setup
 
-Create the real social accounts before starting this section. Do not use personal accounts by mistake.
+This is initial-setup reference, not an instruction to reconnect the already working deployment. Use only the intended PURSUIT accounts. Instagram is optional; it is not required for the active TikTok/Shorts/Spotify workflow.
 
 1. Create or finish the PURSUIT TikTok account.
-2. Create or finish the PURSUIT Instagram account and make it a Professional Creator or Business account.
-3. Confirm you can log in to the intended PURSUIT YouTube, Instagram, and TikTok accounts in the browser.
+2. If adding Instagram later, create the intended PURSUIT account with the required creator/business settings.
+3. Confirm you can log in to the intended PURSUIT YouTube and TikTok accounts, and Instagram only if using it.
 4. Create a Post for Me project and copy its API key.
 5. Run setup:
 
@@ -290,91 +209,11 @@ A controlled real-world Drive test and a real three-Short batch were successfull
 
 The program downloads the full YouTube episode, converts it to MP3, uploads it to Cloudflare R2, and updates a public podcast RSS feed. After Anya connects that feed to Spotify once, Spotify imports future episodes. No per-episode Spotify upload is needed. Spotify controls the import delay; `published` in this tool means the public feed has been verified, not that Spotify has finished importing it.
 
-The implementation is included in this project and tested with simulated storage, HTTP responses and generated audio. It still needs the real Cloudflare account, deployment and Spotify registration before it is live.
+**Live setup status, October 8, 2026:** the Cloudflare account, private bucket, publishing credential, cover upload and server deployment are complete. The first approved real episode is published to our [public feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml), and public audio/feed verification passed. Spotify has not yet been connected to this new feed; recurring publication is OFF. Start with [Finish Spotify Once](PROJECT_GUIDE.md#finish-spotify-once), not the account-creation steps already completed below.
 
-### What Anya Needs to Create
+For the plain-English overview and monthly budget, read [Services, Costs, and What You Do](PROJECT_GUIDE.md). The following instructions remain useful for an initial setup or another machine.
 
-1. A [Cloudflare account](https://dash.cloudflare.com/sign-up), with R2 enabled. Cloudflare may require billing details even when usage fits the free allowance. Create a **Standard** storage bucket named `pursuit-podcast`. Use a dedicated bucket, with no automatic expiry rules for podcast audio. Leave bucket public access disabled; the included Worker serves only the feed, audio and cover.
-2. In R2, create S3 credentials with **Object Read & Write** permission restricted to this bucket. Keep the Account ID, Access Key ID and Secret Access Key private. Enter the keys in the local setup prompt, not in messages or GitHub. They are saved outside the repository with owner-only file permissions.
-3. A square podcast cover image, ideally 1400-3000 pixels per side. Upload it to the bucket as `cover.jpg` or `cover.png`. Choose the show title, description, explicit-content setting and the email Anya can receive Spotify verification at. The owner email will appear in the public RSS feed.
-4. A [Spotify for Creators account](https://creators.spotify.com/) for the intended owner. For this automatic route, **submit an existing RSS show**, rather than creating a second show hosted by Spotify. If PURSUIT already exists there, check its current hosting/feed before creating another listing.
-
-No domain purchase is needed: the included Cloudflare Worker exposes a `workers.dev` HTTPS address. Cloudflare recommends custom domains for business-critical use; a domain can be connected later. This route avoids a podcast-host subscription, but is not unlimited free hosting. R2 Standard currently includes **10 GB** and operation allowances; Workers Free includes **100,000 requests/day**. Usage above allowances can incur charges or hit limits. Set billing notifications and check usage. A one-hour episode at 160 kbps uses approximately 72 MB before small overhead.
-
-Sources: [R2 pricing](https://developers.cloudflare.com/r2/pricing/), [Workers pricing](https://developers.cloudflare.com/workers/platform/pricing/), [workers.dev routing](https://developers.cloudflare.com/workers/configuration/routing/workers-dev/).
-
-### Deploy the Public Feed Server Once
-
-On the Mac running this project, install the added Python dependency:
-
-```bash
-cd ~/Documents/PURSUIT_CLIPS_TOOL
-.venv/bin/pip install -r requirements.txt
-```
-
-Use Node.js and Cloudflare's Wrangler CLI to deploy the included server. Sign in with the Cloudflare account that owns the bucket:
-
-```bash
-cd ~/Documents/PURSUIT_CLIPS_TOOL/cloudflare-podcast
-npx wrangler login
-npx wrangler deploy
-```
-
-The deployment prints an address like `https://pursuit-podcast.YOUR-SUBDOMAIN.workers.dev`. Keep that address stable. If the bucket has another name, update `bucket_name` in `wrangler.jsonc` before deploying. Only one Mac should write to this show's feed; local locking does not coordinate multiple computers.
-
-The Worker permits only GET/HEAD requests for `feed.xml`, `cover.jpg`, `cover.png` and `media/VIDEO_ID.mp3`. It streams audio, supports byte ranges for podcast players, and serves the feed without stale caching. The private bucket's write credentials are used by the local publisher, not exposed through the Worker.
-
-### Configure and Test Once
-
-Return to the project root and substitute the actual non-secret settings:
-
-```bash
-cd ~/Documents/PURSUIT_CLIPS_TOOL
-./autopilot podcast-setup \
-  --account-id YOUR_CLOUDFLARE_ACCOUNT_ID \
-  --bucket pursuit-podcast \
-  --public-url https://pursuit-podcast.YOUR-SUBDOMAIN.workers.dev \
-  --owner-email OWNER_EMAIL \
-  --artwork-url https://pursuit-podcast.YOUR-SUBDOMAIN.workers.dev/cover.jpg
-```
-
-Enter the R2 keys at the hidden prompts. Setup selects automatic R2 publication, allows downloading the owner's YouTube episodes, and leaves automation off. Settings and credentials persist for scheduled runs. Show settings can be changed in the `podcast` section of `~/Library/Application Support/PURSUIT_AUTOPILOT/config.json`: `title`, `description`, `author`, `category`, `language` and `explicit`. Defaults describe PURSUIT with Anya Postnikov; review them before the first publication.
-
-Check conversion without uploading, then publish the first full episode:
-
-```bash
-./autopilot podcast-publish latest --dry-run
-./autopilot podcast-publish latest
-./autopilot podcast-status
-```
-
-These commands can take time while downloading and converting a full episode. The dry run creates local MP3/status files but does not upload. You can use a specific YouTube URL in place of `latest`, including an older episode. If downloading fails, provide the original export with `--source /path/to/episode.mp4`.
-
-The publisher uploads the audio first, verifies public byte-range access, and then uploads the feed. Stable video-ID filenames and RSS GUIDs make retries idempotent. It reads the remote feed before each update to preserve existing episodes even after local state is lost. Upload/verification failures do not record successful publication. It refuses to overwrite a feed with unrecognized episode GUIDs.
-
-### Anya Connects Spotify Once
-
-1. Open the printed feed URL, ending in `/feed.xml`, and verify it is publicly readable. Open the cover URL and test the MP3 from the feed. Check the show's details and owner email; validate the RSS with a podcast-feed validator.
-2. In Spotify for Creators, add/claim an existing show and enter that RSS URL. Complete the verification sent to the owner email.
-3. Confirm the first episode appears on Spotify. [Spotify's ownership instructions](https://support.spotify.com/us/creators/article/claiming-your-podcast-on-spotify-for-creators/).
-4. Start watching for future uploads, then enable recurring publication:
-
-   ```bash
-   ./autopilot podcast-run --once --dry-run
-   ./autopilot podcast-auto on
-   ```
-
-The first watching run records the current latest YouTube episode as its starting point. Older episodes are not automatically backfilled; use `podcast-publish URL` for selected older episodes. Later scheduled live autopilot runs publish newer full-length episodes, oldest first, one per run.
-
-### Thereafter
-
-**Anya:** publish the full episode to YouTube as usual. Maintain the Cloudflare/Spotify accounts and respond if credentials or downloads fail. There is no routine Spotify upload step.
-
-**Program:** detect the new episode, retrieve media, convert MP3, upload audio, update/verify RSS and record status. The Mac must be awake and online; existing autopilot pause controls apply. Hosting remains available when the Mac is off, but new episodes cannot be processed until it runs again.
-
-**Spotify:** import the submitted RSS feed on its own schedule. The program does not control or verify that import timing.
-
-Use `./autopilot podcast-status` for errors and `./autopilot podcast-auto off` to stop future publication. Already hosted audio and the feed stay online; this command does not remove existing episodes.
+For the remaining one-time connection and everyday responsibilities, see [Finish Spotify Once](PROJECT_GUIDE.md#finish-spotify-once). Thereafter the user uploads the original to YouTube and the enabled program publishes full audio through our feed. Spotify controls when it imports updates.
 
 ## Safety
 

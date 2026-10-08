@@ -2,7 +2,9 @@
 
 The program downloads the full YouTube episode, converts it to MP3, uploads it to Cloudflare R2, and updates a public podcast RSS feed. After Anya connects that feed to Spotify once, Spotify imports future episodes. No per-episode Spotify upload is needed. Spotify controls the import delay; `published` in this tool means the public feed has been verified, not that Spotify has finished importing it.
 
-The implementation is included in this project and tested with simulated storage, HTTP responses and generated audio. It still needs the real Cloudflare account, deployment and Spotify registration before it is live.
+**Live setup status, October 8, 2026:** the Cloudflare account, private bucket, publishing credential, cover upload and server deployment are complete. The first approved real episode is published to our [public feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml), and public audio/feed verification passed. Spotify has not yet been connected to this new feed; recurring publication is OFF. Start with [Finish Spotify Once](PROJECT_GUIDE.md#finish-spotify-once), not the account-creation steps already completed below.
+
+For the plain-English overview and monthly budget, read [Services, Costs, and What You Do](PROJECT_GUIDE.md). The following instructions remain useful for an initial setup or another machine.
 
 ## What Anya Needs to Create
 
@@ -28,7 +30,7 @@ Use Node.js and Cloudflare's Wrangler CLI to deploy the included server. Sign in
 
 ```bash
 cd ~/Documents/PURSUIT_CLIPS_TOOL/cloudflare-podcast
-npx wrangler login
+npx wrangler login --scopes user:read account:read workers_scripts:write
 npx wrangler deploy
 ```
 
@@ -67,7 +69,7 @@ The publisher uploads the audio first, verifies public byte-range access, and th
 ## Anya Connects Spotify Once
 
 1. Open the printed feed URL, ending in `/feed.xml`, and verify it is publicly readable. Open the cover URL and test the MP3 from the feed. Check the show's details and owner email; validate the RSS with a podcast-feed validator.
-2. In Spotify for Creators, add/claim an existing show and enter that RSS URL. Complete the verification sent to the owner email.
+2. For this deployment, sign in to the account owning the existing PURSUIT show. Inspect its current hosting/feed settings, then use the applicable feed update or host-migration procedure to connect our feed. Review and approve any migration before applying it; preserve existing episodes/listeners and do not create a duplicate listing. See [Spotify feed updates](https://support.spotify.com/dj-en/podcasters/article/updating-an-rss-feed-link-or-hosting-provider/) and [moving a Spotify-hosted show](https://support.spotify.com/ws/creators/article/switching-away-from-spotify-for-creators-with-a-301-redirect/). A genuinely new show without an existing listing can instead be added/claimed using its RSS URL. Complete any ownership verification sent to the feed owner's email.
 3. Confirm the first episode appears on Spotify. [Spotify's ownership instructions](https://support.spotify.com/us/creators/article/claiming-your-podcast-on-spotify-for-creators/).
 4. Start watching for future uploads, then enable recurring publication:
 
