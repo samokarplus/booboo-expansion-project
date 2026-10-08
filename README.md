@@ -58,7 +58,7 @@ flowchart TD
     I --> J[Spotify imports the connected feed]
 ```
 
-The Spotify branch still needs its final account/feed connection. Our public [RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) already contains **How to be More Consistent Than 99% of People**. That confirms our hosting, not Spotify availability. There is an [existing PURSUIT Spotify show](https://open.spotify.com/show/2EOi7bHXVbBCbYJgXm6fWu); use it rather than creating a duplicate.
+The Spotify branch still needs its final account/feed connection. Our public [RSS feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml) already contains **How to be More Consistent Than 99% of People**. That confirms our hosting, not Spotify availability. There is an [existing PURSUIT Spotify show](https://open.spotify.com/show/7KZqjxysKxNS4QntMCVG3B); use it rather than creating a duplicate.
 
 ## What Each Thing Does
 
