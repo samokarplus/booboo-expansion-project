@@ -17,7 +17,7 @@ PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikT
 | Google Drive | Optional review copies of Shorts | $0 extra with sufficient storage |
 | GitHub | Stores code, history and these instructions | $0 extra required |
 
-**Your normal job:** upload the original to YouTube and keep the Mac awake/online for new work. TikTok and weekly Shorts are enabled. Spotify still needs the existing show's feed connection and first import verified before automation is switched on. Shorts' Related video field is a manual step when wanted.
+**Your normal job:** upload the original to YouTube and keep the Mac awake/online for new work. TikTok and weekly Shorts are enabled. Spotify's hosting decision is paused over monetization: no redirect was confirmed and podcast automation is OFF. Shorts' Related video field is a manual step when wanted.
 
 Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing), [Cloudflare](https://developers.cloudflare.com/r2/pricing/). Detailed costs, schedules, setup and responsibilities are below.
 
@@ -238,6 +238,8 @@ Useful commands:
 A controlled real-world Drive test and a real three-Short batch were successfully uploaded and downloaded back for integrity verification before automatic delivery was enabled. The recurring new-episode path is covered by automated tests; the first completely hands-off future episode remains the final real-world validation of that recurring path.
 
 ## Spotify: Automatic Full Episodes
+
+**Hosting decision paused:** Spotify's final redirect dialog says moving this show to our Cloudflare feed removes Spotify-hosted ads monetization and converts existing video episodes to audio. We cancelled that dialog and left automation OFF. Preserve Spotify hosting while deciding whether built-in monetization or our current automatic RSS route is the priority. Automation itself does not prohibit earnings: Spotify supports some approved partner-host integrations, but our custom feed is not one of them. See [the hosting tradeoff](PROJECT_GUIDE.md#spotify-hosting-and-monetization) before following migration instructions.
 
 The program downloads the full YouTube episode, converts it to MP3, uploads it to Cloudflare R2, and updates a public podcast RSS feed. After Anya connects that feed to Spotify once, Spotify imports future episodes. No per-episode Spotify upload is needed. Spotify controls the import delay; `published` in this tool means the public feed has been verified, not that Spotify has finished importing it.
 

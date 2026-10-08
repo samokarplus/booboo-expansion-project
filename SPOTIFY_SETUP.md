@@ -1,5 +1,7 @@
 # Automatic PURSUIT Episodes on Spotify
 
+**Stop before migration:** the signed-in show's redirect dialog says this move removes Spotify-hosted ads monetization and converts video episodes to audio. The user paused to review that tradeoff; the final redirect was cancelled and automation is OFF. Creator sign-in is complete. Read [Spotify Hosting and Monetization](PROJECT_GUIDE.md#spotify-hosting-and-monetization) before applying the setup instructions below. They describe the Cloudflare route, not a recommendation to give up Spotify hosting.
+
 The program downloads the full YouTube episode, converts it to MP3, uploads it to Cloudflare R2, and updates a public podcast RSS feed. After Anya connects that feed to Spotify once, Spotify imports future episodes. No per-episode Spotify upload is needed. Spotify controls the import delay; `published` in this tool means the public feed has been verified, not that Spotify has finished importing it.
 
 **Live setup status, October 8, 2026:** the Cloudflare account, private bucket, publishing credential, cover upload and server deployment are complete. The first approved real episode is published to our [public feed](https://pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml), and public audio/feed verification passed. Spotify has not yet been connected to this new feed; recurring publication is OFF. Start with [Finish Spotify Once](PROJECT_GUIDE.md#finish-spotify-once), not the account-creation steps already completed below.

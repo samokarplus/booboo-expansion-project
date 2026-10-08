@@ -8,7 +8,21 @@ Deployment snapshot and prices checked: **October 8, 2026**. All schedules use *
 
 **Expected service cost at current small usage: about $10/month, plus the existing Claude subscription.** The $10 is Post for Me. Cloudflare should currently fit its free allowances. Spotify, YouTube, TikTok, and this GitHub repository add no required publishing subscription for this setup. This is an estimate before taxes, not a complete account invoice or spending cap.
 
-**The remaining Spotify task:** sign in to the existing PURSUIT show in Spotify for Creators, connect it to our feed, verify that the first real episode appears, then enable recurring podcast publishing on the Mac. We have not completed that connection yet.
+**Spotify is paused for a hosting decision:** creator sign-in is complete. Spotify's final migration warning says this Cloudflare route removes Spotify-hosted ads monetization and converts video episodes to audio. The final redirect was cancelled, hosting remains unchanged, and automatic podcast publication is OFF. Review the tradeoff below before connecting the feed.
+
+## Spotify Hosting and Monetization
+
+The issue is the selected hosting method. Our custom RSS route automatically distributes audio, but Spotify's final redirect screen explicitly says the show will no longer qualify for ads monetization on Spotify for Creators. That affects those built-in monetization tools, not every possible source of income; direct sponsor arrangements and earnings on other platforms are separate.
+
+| Path | Publishing workflow | Monetization implications |
+| --- | --- | --- |
+| Keep Spotify hosting | Code prepares audio/copy; upload through Spotify's dashboard. Dashboard automation could be investigated, but is not implemented or guaranteed | Preserves the hosting requirement for applying to Spotify's program; audience/location/content eligibility still applies |
+| Use our Cloudflare RSS feed | Code can publish full audio automatically; Spotify imports the connected feed | The redirect warning removes this show's Spotify-hosted ads eligibility; external sponsorship income is separate |
+| Use an approved Spotify integration partner | Depends on that provider's supported automation and pricing | Some partners support eligible video monetization; not every external host does |
+
+Spotify currently lists hosting, audience, episode and market requirements for its program; simply uploading does not guarantee earnings. Approved partner integrations are also available. Our own Cloudflare feed is not an approved partner integration. [Spotify Partner Program](https://support.spotify.com/us/creators/article/spotify-partner-program/), [Spotify's partner integrations](https://creators.spotify.com/resources/news/expanding-video-partners-and-platforms).
+
+**Current recommendation:** keep Spotify hosting while Anya decides about monetization. Do not apply the permanent redirect or turn on the Cloudflare publishing branch merely to finish setup. The existing code, cover and verified MP3 remain usable; the work is not lost.
 
 ## What Each Thing Does
 
@@ -75,7 +89,7 @@ Workers Free allows 100,000 requests per day across the account. Hitting the Fre
 | Full YouTube episode | The source for everything | Finds the upload after it is published | Record/edit the original, upload it, choose title/description and visibility |
 | TikTok `@pursuitthepod` | Auto-posting enabled | Selects moments, edits/captions/checks clips and schedules up to 3/day at 9 AM, 3 PM and 9 PM | Maintain account connection; review quality/results; respond to comments |
 | YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled | Prepares approved clips and schedules up to 3/week, Mon/Wed/Fri at 5 PM | Maintain connection; optionally select the full episode as Related video in YouTube Studio |
-| Spotify | Public audio/feed ready; connection and automation still pending | Already converted and hosted the approved first episode. Once enabled, repeats that for new eligible uploads | Finish creator sign-in and connect the existing show to the feed once; verify import; then enable automation |
+| Spotify | Signed in; Cloudflare feed ready; hosting decision paused and automation OFF | Already converted and hosted the approved first episode; can prepare audio | Decide hosting/monetization before migration. Keep current hosting until that decision is approved |
 | Google Drive review copies | Optional delivery enabled and test previously verified | Delivers up to 3 approved clips and posting text for each new episode; cleans tool-owned copies after 14 days | Review or download if useful; reauthorize Google if needed. Manual posting from Drive is optional |
 | Instagram | Not established here as an active automatic destination | Code supports a later account-connection workflow | Connect and verify the intended account before adding automated Reels |
 
@@ -110,7 +124,7 @@ The public feed is [pursuit-podcast.endlesspursuits-co.workers.dev/feed.xml](htt
 
 Still to do:
 
-1. Sign in to the Spotify for Creators account that owns the [existing PURSUIT show](https://open.spotify.com/show/2EOi7bHXVbBCbYJgXm6fWu). That listing currently has a short test episode. The owner sign-in is unfinished; a Google sign-in flow has been opened for the supplied owner email.
+1. Creator sign-in is now complete for [the PURSUIT show open in the dashboard](https://open.spotify.com/show/7KZqjxysKxNS4QntMCVG3B), which has a test episode. Review the monetization tradeoff before proceeding; a different similarly named listing was observed earlier, so confirm the intended show identity rather than creating another.
 2. Inspect that show's current hosting/feed settings. Connect the existing show to our public feed using the appropriate update or move-hosting procedure. If it is hosted by Spotify, moving to our host may require an RSS redirect. Do not create a duplicate show, delete the test episode, or redirect the old feed without reviewing and approving that change. [Spotify feed updates](https://support.spotify.com/dj-en/podcasters/article/updating-an-rss-feed-link-or-hosting-provider/), [moving a Spotify-hosted show](https://support.spotify.com/ws/creators/article/switching-away-from-spotify-for-creators-with-a-301-redirect/).
 3. Complete any ownership verification, then confirm the real episode appears in Spotify. A host migration can take time; it is not an immediate upload button.
 4. Enable recurring podcast publication on the Mac: `./autopilot podcast-auto on`.
