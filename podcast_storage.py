@@ -8,6 +8,8 @@ import xml.etree.ElementTree as ET
 
 import podcast_distribution as pd
 
+PUBLIC_HEADERS = {"User-Agent": "PURSUIT-Podcast/1.0"}
+
 
 def credentials_file():
     return pd.ap.STATE_DIR / "podcast-r2-credentials.json"
@@ -83,7 +85,7 @@ def read_remote_feed(storage, bucket):
 
 
 def check_audio(url, expected_length):
-    request = urllib.request.Request(url, headers={"Range": "bytes=0-1023"})
+    request = urllib.request.Request(url, headers={**PUBLIC_HEADERS, "Range": "bytes=0-1023"})
     with urllib.request.urlopen(request, timeout=30) as response:
         if response.status != 206 or not response.headers.get("Content-Range", "").endswith(f"/{expected_length}"):
             raise pd.PodcastError("Public audio must support byte-range requests and expose the correct length.")
@@ -94,7 +96,8 @@ def check_audio(url, expected_length):
 def check_artwork():
     import cv2
     import numpy as np
-    with urllib.request.urlopen(pd.setting("artwork_url"), timeout=30) as response:
+    request = urllib.request.Request(pd.setting("artwork_url"), headers=PUBLIC_HEADERS)
+    with urllib.request.urlopen(request, timeout=30) as response:
         data = response.read(10 * 1024 * 1024 + 1)
     if len(data) > 10 * 1024 * 1024 or not data.startswith((b"\xff\xd8", b"\x89PNG\r\n\x1a\n")):
         raise pd.PodcastError("Cover art must be a public JPEG or PNG no larger than 10 MB.")
@@ -130,7 +133,8 @@ def publish(ep, mp3):
         else:
             check_audio(existing["enclosure_url"], existing["length"])
         # Feed upload timeouts can be retried: the next run adopts the stable GUID.
-        with urllib.request.urlopen(f"{base}/feed.xml", timeout=30) as response:
+        request = urllib.request.Request(f"{base}/feed.xml", headers=PUBLIC_HEADERS)
+        with urllib.request.urlopen(request, timeout=30) as response:
             public_feed = ET.fromstring(response.read())
         remote_guids = {item.findtext("guid") for item in public_feed.findall("./channel/item")}
         if not {r["guid"] for r in rows}.issubset(remote_guids):
