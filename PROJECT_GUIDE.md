@@ -121,6 +121,8 @@ The social path is scheduled; the Spotify dashboard step is currently assisted, 
 
 ## Current Spotify Publication and Next Steps
 
+**Backfill in progress:** Samo authorized publishing the podcast/talk catalog as full videos, excluding race vlogs and the EMT exam video. Preparation is saved per YouTube ID and done in bounded batches with a disk-space floor; successful packages keep their video/details, while only the tool's scratch downloads/conversions are removed. The queue retains exclusions, review holds and errors across restarts. Existing audio publications need video replacement, not duplicate episodes. Only a confirmed Spotify Published entry is recorded as live. No claim is made that the catalog backfill or recurring uploader is finished.
+
 Completed: creator sign-in, full MP3 preparation and a successful dashboard upload of [How to be More Consistent Than 99% of People](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH). Spotify confirms Published, Audio, 8:48. The 27-second "Delete this later" test was deleted with permission; the real episode is the sole remaining dashboard entry. Spotify hosting and monetization settings were not changed.
 
 The separate Cloudflare server, cover, audio and RSS feed also work, but that feed is not connected to Spotify. Its automatic publishing switch remains OFF. There is no required RSS redirect for the direct dashboard route.
