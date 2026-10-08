@@ -89,7 +89,7 @@ For the full budget, each platform's human steps and troubleshooting, see [Servi
 
 ## Technical Reference
 
-The sections below cover installation, manual commands, account connections, testing and operation. The live Mac's settings and private files are separate from GitHub. Some earlier Shorts/Drive changes remain local and are not all committed, so the deployment snapshot above is not a claim that a fresh clone contains every live feature. See [GitHub versus the live Mac](PROJECT_GUIDE.md#github-versus-the-live-mac).
+The sections below cover installation, manual commands, account connections, testing and operation. The live Mac's settings and private files are separate from GitHub. The October 8 Codex migration also synchronized the previously local Shorts/Drive and podcast source modules with GitHub (commit `521d0ca`). Private Mac configuration, credentials, runtime state, and generated media remain local; a fresh clone still needs setup and account connections. See [GitHub versus the live Mac](PROJECT_GUIDE.md#github-versus-the-live-mac).
 
 ## Requirements
 
@@ -123,7 +123,7 @@ If the ChatGPT desktop app is installed, its bundled Codex CLI is found automati
 
 ## AI provider (Codex by default; Claude optional)
 
-**Status: the Codex migration passed its initial tests but still needs verification during real scheduled runs.** A 2-call smoke test (one transcript analysis, one visual check of a finished clip) returned valid structured output and passed the existing score checks; the full unattended pipeline has not yet run on Codex alone.
+**Status (October 8, 2026): Codex is the default and Claude is not required for normal operation.** The migration is committed to `main` (`521d0ca`). Initial tests passed, but real unattended scheduled runs still need verification. A 2-call smoke test (one transcript analysis, one visual check of a finished clip) returned valid structured output and passed the existing score checks; the full unattended pipeline has not yet run on Codex alone.
 
 All model calls (transcript analysis, clip selection, scoring, titles/captions/hashtags, and the final visual quality check) go through one file, `llm.py`. The prompts, `MIN_POST_SCORE`, and every other threshold and safety check are unchanged.
 
