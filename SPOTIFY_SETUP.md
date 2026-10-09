@@ -4,6 +4,8 @@
 
 **Current routine:** the test episode is deleted. `./autopilot podcast-prepare latest --download` now prepares full video as `episode.mp4` plus details. Upload it to the existing show, then verify Published, Video and public playback. For an already-published audio episode, replace it with video rather than creating another episode. Add `--format audio` for MP3 fallback. There is no recurring Spotify uploader or upload schedule yet. Keep Spotify hosting; Anya completes Monetize eligibility/application/payout/ad-break steps herself. Eligible video supports Premium video revenue as well as ads; MP3 does not support Premium video revenue. See [current workflow](PROJECT_GUIDE.md#current-spotify-publication-and-next-steps).
 
+**Backfill ordering:** preserve the original YouTube release date (`source_upload_date` in `episode.json`). For already-published videos, open Details > Schedule, choose that past date and Save. Do not delete/re-upload to change the order. Spotify's newest-first listing then follows the original release chronology rather than the transfer order.
+
 **Stop before migration:** the signed-in show's redirect dialog says this move removes Spotify-hosted ads monetization and converts video episodes to audio. The user paused to review that tradeoff; the final redirect was cancelled and automation is OFF. Creator sign-in is complete. Read [Spotify Hosting and Monetization](PROJECT_GUIDE.md#spotify-hosting-and-monetization) before applying the setup instructions below. They describe the Cloudflare route, not a recommendation to give up Spotify hosting.
 
 ## Optional External-RSS Route Only

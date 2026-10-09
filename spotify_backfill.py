@@ -1,6 +1,7 @@
 """Resumable local preparation queue. Spotify publication is verified separately."""
 
 import argparse
+import datetime as dt
 import fcntl
 import json
 import shutil
@@ -17,6 +18,28 @@ EXCLUDED = {
     "HE80OsnVLFo": "EMT exam video",
     "9QlJ3H6Kr-U": "Ultra race preparation/race-day vlog (confirmed by video inspection)",
 }
+
+
+def cache_release_dates(rows):
+    """Keep the original public YouTube calendar dates for chronological backfill."""
+    path = pd.ap.STATE_DIR / "spotify-release-dates.json"
+    dates = pd.ap.load(path, {})
+    for row in rows:
+        if row["status"] == "excluded":
+            continue
+        video_id = row["id"]
+        if video_id not in dates:
+            info = pd.pc.fetch_info(row["url"])
+            date = dt.datetime.strptime(info.get("upload_date") or "", "%Y%m%d").date()
+            dates[video_id] = {"upload_date": info["upload_date"], "date": date.isoformat()}
+            pd.ap.save(path, dates)
+            print(f"Source date: {video_id} {date}", flush=True)
+        package = Path(pd.setting("ready_dir", Path.home() / "Desktop" / "PURSUIT_SPOTIFY_READY")) / video_id / "episode.json"
+        if package.exists():
+            details = pd.ap.load(package, {})
+            details["source_upload_date"] = dates[video_id]["upload_date"]
+            pd.ap.save(package, details)
+    return dates
 
 
 def record_dashboard(video_id, spotify_episode_id, status, verification=""):
@@ -123,6 +146,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--prepare", type=int, default=0, metavar="COUNT",
                         help="prepare up to COUNT pending videos; does not upload to Spotify")
+    parser.add_argument("--cache-dates", action="store_true", help="save original YouTube dates for the entire talk catalog")
     args = parser.parse_args()
     if args.prepare < 0:
         parser.error("COUNT must be nonnegative")
@@ -134,6 +158,8 @@ def main():
             raise pd.PodcastError("Another backfill preparation run is already active.")
         rows = inventory()
         print(f"Catalog: {len(rows)} videos; {sum(e['status'] == 'excluded' for e in rows)} excluded.", flush=True)
+        if args.cache_dates:
+            cache_release_dates(rows)
         if args.prepare:
             prepare(rows, args.prepare)
         statuses = {state: sum(e["status"] == state for e in rows) for state in {e["status"] for e in rows}}

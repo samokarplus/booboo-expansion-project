@@ -366,6 +366,7 @@ def prepare_spotify_package(ep, media):
     description = clean_description(ep.get("description")) + f"\n\nYouTube version: {ep['url']}"
     details = {"video_id": ep["id"], "title": ep["title"], "description": description,
                "explicit": truthy(setting("explicit", False)), "source_url": ep["url"],
+               "source_upload_date": ep.get("upload_date"),
                "status": "ready_to_upload", "media_type": "video" if is_video else "audio",
                "media_file": str(target), "video_file" if is_video else "audio_file": str(target)}
     ap.save(folder / "episode.json", details)
@@ -375,6 +376,8 @@ def prepare_spotify_package(ep, media):
         "NEXT STEP\nOpen https://creators.spotify.com/ and choose your PURSUIT show.\n"
         f"Upload {target.name}, copy the title and description. If this episode already\n"
         "exists, update that episode instead of creating a duplicate.\n"
+        f"Use the original YouTube release date ({details['source_upload_date'] or 'verify on YouTube'})\n"
+        "in Spotify's Schedule controls so the archive remains chronological.\n"
         "review the details, then publish. This package has not been uploaded or published.\n",
         encoding="utf-8")
     return {"provider": "spotify_manual", "package_dir": str(folder),
@@ -452,8 +455,8 @@ def run(args):
 def write_status(lines):
     state = load_state()
     ledger = load_ledger()
-    lines += ["", "Podcast / Spotify distribution:"]
-    lines.append(f"  Automation: {'ON' if podcast_enabled() else 'OFF'}")
+    lines += ["", "Podcast feed / Spotify dashboard:"]
+    lines.append(f"  Feed/preparation automation: {'ON' if podcast_enabled() else 'OFF'}")
     lines.append(f"  Mode: {setting('mode', 'r2')}")
     if setting("mode", "r2") == "r2":
         lines.append(f"  RSS feed: {setting('r2_public_url', '(not configured)').rstrip('/')}/feed.xml")
@@ -474,7 +477,12 @@ def write_status(lines):
             msg += f" -- {rec['package_dir']}"
         lines.append(msg)
     if ledger["episodes"]:
-        lines.append(f"  Published episodes recorded: {len(ledger['episodes'])}")
+        lines.append(f"  RSS/feed publications recorded: {len(ledger['episodes'])}")
+    dashboard = ap.load(ap.STATE_DIR / "spotify-dashboard-ledger.json", {"episodes": []})["episodes"]
+    videos = sum(e.get("status") == "published" and e.get("format") == "video" for e in dashboard)
+    uploading = sum(e.get("status") == "uploading" for e in dashboard)
+    lines.append(f"  Spotify dashboard videos verified: {videos}; tracked uploads: {uploading}")
+    lines.append("  Spotify dashboard uploads are assisted; no recurring dashboard uploader is installed.")
 
 
 def cmd_source(args):

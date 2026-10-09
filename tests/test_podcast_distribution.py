@@ -126,6 +126,16 @@ class PodcastDistributionTests(unittest.TestCase):
         msg = pd.process_episode({"id": "abc123", "title": "Episode", "url": "https://www.youtube.com/watch?v=abc123"}, state)
         self.assertIn("already published", msg)
 
+    def test_status_distinguishes_feed_records_from_verified_spotify_videos(self):
+        ap.save(pd.ledger_file(), {"episodes": [{"video_id": "feed-only"}]})
+        ap.save(ap.STATE_DIR / "spotify-dashboard-ledger.json", {"episodes": [
+            {"status": "published", "format": "video"}, {"status": "published", "format": "audio"},
+            {"status": "uploading", "format": "video"}, {"status": "ready_to_upload", "format": "video"}]})
+        lines = []
+        pd.write_status(lines)
+        self.assertIn("  RSS/feed publications recorded: 1", lines)
+        self.assertIn("  Spotify dashboard videos verified: 1; tracked uploads: 1", lines)
+
     def test_free_default_prepares_package_without_host_publication(self):
         source = TEST_DIR / "free-source.wav"
         make_wav(source)
@@ -134,7 +144,7 @@ class PodcastDistributionTests(unittest.TestCase):
                                              "spotify_format": "audio",
                                              "source_files": {"abc123": str(source)}}})
         ep = {"id": "abc123", "title": "Full episode", "description": "A conversation",
-              "url": "https://www.youtube.com/watch?v=abc123"}
+              "url": "https://www.youtube.com/watch?v=abc123", "upload_date": "20251007"}
         with patch.object(pd.pc, "fetch_info", return_value=ep), \
                 patch.object(ps, "publish", side_effect=AssertionError("No upload during preparation")):
             message = pd.process_episode(ep, pd.load_state())
@@ -142,6 +152,7 @@ class PodcastDistributionTests(unittest.TestCase):
         self.assertGreater((ready / "abc123" / "episode.mp3").stat().st_size, 1024)
         details = json.loads((ready / "abc123" / "episode.json").read_text())
         self.assertEqual(details["title"], "Full episode")
+        self.assertEqual(details["source_upload_date"], "20251007")
         self.assertIn(ep["url"], details["description"])
         self.assertEqual(pd.load_state()["episodes"]["abc123"]["status"], "ready_to_upload")
         self.assertFalse(pd.already_published("abc123"))

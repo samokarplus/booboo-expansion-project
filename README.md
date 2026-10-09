@@ -17,7 +17,7 @@ PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikT
 | Google Drive | Optional review copies of Shorts | $0 extra with sufficient storage |
 | GitHub | Stores code, history and these instructions | $0 extra required |
 
-**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled. Spotify now has full videos, and an assisted 55-episode talk-catalog backfill is underway; **future dashboard uploads are not automatic yet**. Spotify hosting preserves monetization eligibility, not guaranteed earnings. Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
+**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled. **Spotify is caught up:** all 60 YouTube videos are on Spotify as video episodes with matching dates (finished Oct 8, 2026). **New episodes are NOT copied to Spotify automatically yet**; each new one still needs the assisted dashboard upload. Spotify hosting preserves monetization eligibility, not guaranteed earnings. Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
 
 Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing), [Cloudflare](https://developers.cloudflare.com/r2/pricing/). Detailed costs, schedules, setup and responsibilities are below.
 
@@ -34,7 +34,7 @@ Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing)
 | Original YouTube episode | Human upload; source for the program | Record/edit and upload the original episode |
 | TikTok `@pursuitthepod` | Automatic posting enabled; up to 3/day at 9 AM, 3 PM and 9 PM Denver time | Maintain account connection and review results; no routine clip upload |
 | YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5 PM Denver time | Maintain connection; set Related video in YouTube Studio when wanted |
-| Spotify | Latest 8:48 episode confirmed Published as Video; assisted talk-catalog backfill underway | No hosting redirect needed; future uploads still need the assisted dashboard flow |
+| Spotify | **Backfill complete:** 60 of 60 YouTube videos are published as video episodes with their original YouTube dates (Oct 8, 2026) | Future uploads still need the assisted dashboard flow; no automatic YouTube-to-Spotify copy exists yet |
 | Google Drive | Optional review delivery enabled; previous test verified | Review/download copies if useful; refresh Google login if it expires |
 
 Schedules are ceilings, not quotas: unsuitable or missing clips leave empty slots. The Mac must be awake and online to prepare new content. Clips already submitted to Post for Me can publish while it is off; existing Cloudflare audio remains available too.
@@ -314,15 +314,17 @@ The Drive path is designed to be unattended but fail-safe: one batch per episode
 
 ## Spotify: Current Publication and Automation
 
-**Working now:** the [real 8:48 episode](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) is confirmed Published as Video, replacing its initial audio on the same episode ID; the test is deleted. Assisted catalog uploads are in progress. Spotify still hosts the show; no redirect was applied.
+**Working now:** Spotify has all 60 YouTube videos as published video episodes, each dated with its original YouTube upload date (verified Oct 8, 2026: 60 on Spotify, 60 on YouTube, dates match one for one). The 8:48 [How to be More Consistent](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) episode was converted to video earlier. Spotify still hosts the show; no redirect was applied.
 
 **Video preparation:** `./autopilot podcast-prepare latest --download` now makes `episode.mp4` (full-length H.264/AAC, original framing) and posting details. Compatible video is preserved; other codecs are converted and duration is checked. Use `--format audio` only for an MP3 fallback. Files land in `~/Desktop/PURSUIT_SPOTIFY_READY/VIDEO_ID/`. [Spotify video specs](https://support.spotify.com/us/creators/article/video-specs/).
 
-**Not automatic yet:** a new YouTube episode does not trigger a Spotify publication. Upload the prepared MP4 to the existing show's dashboard, then confirm Published, Video and public playback. For the already-published audio episode, use its replace-with-video workflow instead of creating a duplicate. The current length filter accepts regular videos at least six minutes long; it does not identify podcast content by genre.
+**Not automatic yet:** a NEW YouTube episode does not trigger a Spotify publication. Upload the prepared MP4 to the existing show's dashboard, set the publish date to the YouTube upload date (Details > Schedule accepts past dates), then confirm Published, Video and public playback. Check the Spotify list for the title first so nothing is uploaded twice. The current length filter accepts regular videos at least six minutes long; it does not identify podcast content by genre.
 
 **Before calling it hands-off:** build and schedule a reliable dashboard uploader, add duplicate/retry checks and login-interruption handling, then verify a future YouTube upload reaches Spotify exactly once. No recurring Spotify job or upload frequency is enabled today.
 
-**Catalog backfill:** an assisted video backfill is in progress, not complete. Only podcast/talk episodes are included; race vlogs and the EMT exam video are excluded. `spotify_backfill.py --prepare COUNT` prepares bounded, resumable batches locally, including short talks below the social pipeline's length cutoff. It does not upload or publish. The private queue is `spotify-backfill.json`; confirmed Spotify episode IDs belong in `spotify-dashboard-ledger.json`. A ready file is never counted as a live episode. Spotify dashboard uploads and final publication checks remain assisted.
+**Catalog backfill: COMPLETE (Oct 8, 2026).** The older videos were added through the Spotify for Creators dashboard in assisted sessions (race vlogs and the EMT exam video included). Known limits: the publish *time of day* on Spotify is the upload time, not YouTube's; three episodes with no YouTube description use the title as their description (Sep 1, Aug 18 and Jul 28, 2026) and several others use only an Apple Podcasts link. `spotify_backfill.py --prepare COUNT` still prepares bounded, resumable local batches and does not upload or publish; its private queue is `spotify-backfill.json` and confirmed Spotify episode IDs belong in `spotify-dashboard-ledger.json`. Dashboard uploads and final publication checks remain assisted.
+
+**Episode order:** use each episode's original YouTube release date, not the day it was transferred to Spotify. On existing episodes, Details > Schedule accepts past dates; Save keeps the same video/link and restores chronological order. `spotify_backfill.py --cache-dates` saves verified source dates and adds them to ready-package metadata. Apply and verify the original date on each remaining backfill publication. [Spotify's ordering instructions](https://support.spotify.com/us/creators/article/changing-episode-order/).
 
 **Monetization:** keeping Spotify hosting preserves that eligibility requirement; Anya must still qualify, apply and complete payouts/ad-break setup in Spotify's Monetize section. Eligible video can earn ads and Premium video revenue; MP3 fallback cannot earn Premium video revenue. Publishing alone does not start earnings. See [Spotify's current requirements](https://support.spotify.com/us/creators/article/spotify-partner-program/).
 

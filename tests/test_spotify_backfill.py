@@ -1,5 +1,7 @@
 import json
+import tempfile
 import unittest
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -68,6 +70,23 @@ class BackfillInventoryTests(unittest.TestCase):
             {"youtube_video_id": "abc", "status": "uploading", "spotify_episode_id": "draft"}])
         self.assertEqual(rows[0]["status"], "uploading")
         self.assertEqual(rows[0]["spotify_episode_id"], "draft")
+
+    def test_release_dates_are_cached_and_saved_in_ready_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "ready" / "abc" / "episode.json"
+            package.parent.mkdir(parents=True)
+            package.write_text(json.dumps({"title": "Episode"}))
+            rows = [{"id": "abc", "url": "https://youtu.be/abc", "status": "ready_to_upload"},
+                    {"id": "excluded", "status": "excluded"}]
+            with patch.object(backfill.pd.ap, "STATE_DIR", root), \
+                    patch.object(backfill.pd, "setting", return_value=root / "ready"), \
+                    patch.object(backfill.pd.pc, "fetch_info", return_value={"upload_date": "20250930"}) as fetch:
+                dates = backfill.cache_release_dates(rows)
+                backfill.cache_release_dates(rows)
+            fetch.assert_called_once()
+            self.assertEqual(dates["abc"]["date"], "2025-09-30")
+            self.assertEqual(json.loads(package.read_text())["source_upload_date"], "20250930")
 
 
 if __name__ == "__main__":
