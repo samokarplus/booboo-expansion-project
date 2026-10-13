@@ -106,6 +106,9 @@ def adopt_orphans(ledger, account_id, queue):
             base = base_external_id(eid)
             if eid in known or not base.endswith("-youtube-weekly") or post.get("status") != "scheduled":
                 continue
+            accounts = {a.get("id") if isinstance(a, dict) else a for a in post.get("social_accounts") or []}
+            if account_id not in accounts:  # only adopt posts for the pinned PURSUIT channel
+                continue
             item = by_base.get(base)
             ledger["posts"].append({
                 "external_id": eid, "status": "scheduled", "post_id": post["id"],

@@ -202,7 +202,9 @@ class NewBehaviorTests(unittest.TestCase):
 
     def test_orphan_remote_posts_are_adopted_once(self):
         remote = {"data": [{"id": "sp_o", "external_id": "pursuit-e-01_a-youtube-weekly", "status": "scheduled",
-                            "scheduled_at": "2026-10-21T11:30:00+00:00"},
+                            "scheduled_at": "2026-10-21T11:30:00+00:00", "social_accounts": [{"id": "acct"}]},
+                           {"id": "sp_w", "external_id": "pursuit-e-03_c-youtube-weekly", "status": "scheduled",
+                            "scheduled_at": "2026-10-21T11:30:00+00:00", "social_accounts": [{"id": "other"}]},
                            {"id": "sp_t", "external_id": "pursuit-e-02_b", "status": "scheduled",
                             "scheduled_at": "2026-10-21T11:30:00+00:00"}], "meta": {"next": None}}
         ledger = {"posts": []}
@@ -222,3 +224,19 @@ class NewBehaviorTests(unittest.TestCase):
         later = [{"status": "scheduled", "scheduled_at": "2026-10-21T05:30:00-06:00"}]
         days = [x.day for x in yt.slots(later, 3, now)]
         self.assertEqual(days, [14, 16, 19])
+
+    def test_tiktok_cleanup_keeps_clip_until_youtube_uses_it(self):
+        f = TEST_DIR / "episode" / "09_keep" / "clip.mp4"
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"mp4")
+        post = {"status": "posted", "file": str(f)}
+        cfg = {"youtube_weekly": {"enabled": True}}
+        with patch.object(ap, "load", side_effect=lambda path, default=None:
+                          cfg if path == ap.CONFIG_FILE else {"posts": []}):
+            ap.cleanup_posted_media(post)
+        self.assertTrue(f.exists())
+        used = {"posts": [{"clip": "09_keep", "status": "scheduled"}]}
+        with patch.object(ap, "load", side_effect=lambda path, default=None:
+                          cfg if path == ap.CONFIG_FILE else used):
+            ap.cleanup_posted_media(post)
+        self.assertFalse(f.exists())

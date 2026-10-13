@@ -448,9 +448,19 @@ def cleanup_unqueued_media(summary):
 
 
 def cleanup_posted_media(post):
-    """Post for Me has the media after a confirmed publish; the local MP4 is no longer needed."""
-    if post.get("status") == "posted" and post.get("file"):
-        Path(post["file"]).unlink(missing_ok=True)
+    """Post for Me has the media after a confirmed publish. Keep the MP4 until YouTube Shorts has used it
+    (or it is past the 30-day freshness window), because the weekly Shorts reuse the same rendered clips."""
+    if post.get("status") != "posted" or not post.get("file"):
+        return
+    mp4 = Path(post["file"])
+    used = any(p.get("clip") == mp4.parent.name and p.get("status") in ("scheduled", "posted", "unknown")
+               for p in load(STATE_DIR / "youtube-weekly-ledger.json", {"posts": []})["posts"])
+    try:
+        stale = now().timestamp() - mp4.stat().st_mtime > MAX_EPISODE_AGE_DAYS * 86400
+    except OSError:
+        return
+    if used or stale or not (load(CONFIG_FILE, {}).get("youtube_weekly") or {}).get("enabled"):
+        mp4.unlink(missing_ok=True)
 
 
 # ------------------------------------------------------------------------------ 3. quality checks
