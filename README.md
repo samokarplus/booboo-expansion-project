@@ -23,6 +23,14 @@ Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing)
 
 ---
 
+## YouTube Shorts: What Happens (updated Oct 13, 2026)
+
+- **Schedule:** up to 3 Shorts a week, **Monday/Wednesday/Friday at 5:00 AM Denver**, on `@AnyaPostnikov`. Slots with no good clip stay empty.
+- **Clip choice:** the best-scoring clips that passed quality checks, with a boost for episodes from the last 14 days.
+- **Runs without the Mac:** the autopilot queues up to 12 Shorts (about 4 weeks) in Post for Me. Once queued, they publish even if the Mac is off. The Mac is only needed to render new episodes and top up the queue; it checks at 07:15, 10:15, 13:15, 16:15, 19:15 and 22:15.
+- **If YouTube rejects an upload:** Post for Me shares one Google project quota across customers, and it rejected two late-day uploads (Oct 9 and 12). The tool now retries quota failures on the next free slot, up to 3 times, and notifies on other failures.
+- **Known limits:** the Oct 9 and 12 failed Shorts were not retried. TikTok deletes a clip's file after posting it, so a Short can be missed if TikTok posts that clip first. A Google Drive sign-in expiry is skipped, not fatal. **Spotify video uploads are still manual.**
+
 ## Deep Dive
 
 ### Current Deployment
