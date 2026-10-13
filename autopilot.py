@@ -1081,6 +1081,10 @@ def cmd_run(args, only_url=None):
                 lines.append(f"{name}: waiting ({e})")
                 log(lines[-1])
             except (Stop, Ambiguous) as e:
+                if name == "shorts delivery" and e.__class__.__name__ == "DriveError":
+                    lines.append(f"{name}: optional Google Drive delivery skipped ({e})")
+                    log(lines[-1])
+                    continue
                 lines.append(f"{name}: STOPPED (nothing questionable was posted): {e}")
                 notify("PURSUIT autopilot stopped", f"{name}: {str(e).splitlines()[0]}")
                 log(lines[-1])
