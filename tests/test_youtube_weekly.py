@@ -184,3 +184,35 @@ class WeeklyTests(unittest.TestCase):
 
         self.assertEqual(ledger["posts"][0]["status"], "failed")
         notify.assert_called_once()
+
+
+class NewBehaviorTests(unittest.TestCase):
+    def test_retry_slot_ignores_failed_and_retry_entries(self):
+        now = dt.datetime(2026, 10, 13, 12, 0, tzinfo=ap.TZ)
+        posts = [{"status": "failed", "scheduled_at": "2026-11-11T05:00:00-07:00"},
+                 {"status": "retry", "scheduled_at": "2026-11-11T05:00:00-07:00"}]
+        first = yt.slots(posts, 1, now)[0]
+        self.assertEqual((first.month, first.day, first.hour), (10, 14, 5))
+
+    def test_delete_rejection_does_not_abort(self):
+        def api(*a, **k):
+            raise ap.Stop("Post for Me refused DELETE (400): processed posts cannot be deleted")
+        with patch.object(ap, "api", api), patch.object(ap, "log"):
+            yt.retire_remote_post({"post_id": "sp_x"})
+
+    def test_orphan_remote_posts_are_adopted_once(self):
+        remote = {"data": [{"id": "sp_o", "external_id": "pursuit-e-01_a-youtube-weekly", "status": "scheduled",
+                            "scheduled_at": "2026-10-21T11:30:00+00:00"},
+                           {"id": "sp_t", "external_id": "pursuit-e-02_b", "status": "scheduled",
+                            "scheduled_at": "2026-10-21T11:30:00+00:00"}], "meta": {"next": None}}
+        ledger = {"posts": []}
+        with patch.object(ap, "api", return_value=remote):
+            yt.adopt_orphans(ledger, "acct", {"clips": []})
+            yt.adopt_orphans(ledger, "acct", {"clips": []})
+        self.assertEqual([p["post_id"] for p in ledger["posts"]], ["sp_o"])
+
+    def test_newest_episode_gets_priority(self):
+        today = ap.now().strftime("%Y%m%d")
+        fresh = {"score": 70, "meta": {"upload_date": today}}
+        old = {"score": 75, "meta": {"upload_date": "20200101"}}
+        self.assertGreater(fresh["score"] + yt.freshness(fresh), old["score"] + yt.freshness(old))
