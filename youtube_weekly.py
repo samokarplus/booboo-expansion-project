@@ -7,7 +7,7 @@ from pathlib import Path
 import autopilot as ap
 
 WEEKDAYS = (0, 2, 4)
-POST_TIME = dt.time(5, 30)
+POST_TIME = dt.time(5, 0)
 SCHEDULE_AHEAD = 12
 MAX_RETRIES = 3
 LEDGER_FILE = ap.STATE_DIR / "youtube-weekly-ledger.json"
@@ -193,4 +193,4 @@ def fill_schedule():
         ap.save(LEDGER_FILE, ledger)
         ap.log(f"YouTube Short scheduled: {record['clip']} for {when:%a %b %d %H:%M}")
         count += 1
-    return f"YouTube weekly: {count} Short(s) added; Monday/Wednesday/Friday at 05:30."
+    return f"YouTube weekly: {count} Short(s) added; Monday/Wednesday/Friday at 05:00."
