@@ -8,7 +8,7 @@ import autopilot as ap
 
 WEEKDAYS = (0, 2, 4)
 POST_TIME = dt.time(5, 30)
-SCHEDULE_AHEAD = 3
+SCHEDULE_AHEAD = 12
 MAX_RETRIES = 3
 LEDGER_FILE = ap.STATE_DIR / "youtube-weekly-ledger.json"
 RETRYABLE_ERROR_PATTERNS = ("429", "quota exceeded", "ratelimitexceeded", "resource_exhausted")
