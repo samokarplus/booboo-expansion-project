@@ -216,3 +216,9 @@ class NewBehaviorTests(unittest.TestCase):
         fresh = {"score": 70, "meta": {"upload_date": today}}
         old = {"score": 75, "meta": {"upload_date": "20200101"}}
         self.assertGreater(fresh["score"] + yt.freshness(fresh), old["score"] + yt.freshness(old))
+
+    def test_slots_fill_gaps_before_later_posts(self):
+        now = dt.datetime(2026, 10, 13, 12, 0, tzinfo=ap.TZ)
+        later = [{"status": "scheduled", "scheduled_at": "2026-10-21T05:30:00-06:00"}]
+        days = [x.day for x in yt.slots(later, 3, now)]
+        self.assertEqual(days, [14, 16, 19])

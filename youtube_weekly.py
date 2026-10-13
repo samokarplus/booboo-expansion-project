@@ -17,14 +17,13 @@ RETRYABLE_ERROR_PATTERNS = ("429", "quota exceeded", "ratelimitexceeded", "resou
 def slots(posts, count, current=None):
     current = current or ap.now()
     earliest = current + dt.timedelta(minutes=30)
-    live = [p for p in posts if p.get("status") in ("scheduled", "unknown")]
-    if live:  # failed/retry entries must not push new slots behind the whole buffer
-        earliest = max(earliest, max(dt.datetime.fromisoformat(p["scheduled_at"])
-                                     for p in live) + dt.timedelta(minutes=1))
+    # Fill the earliest free Mon/Wed/Fri slot; failed/retry entries do not hold slots.
+    taken = {dt.datetime.fromisoformat(p["scheduled_at"]).astimezone(ap.TZ).date()
+             for p in posts if p.get("status") in ("scheduled", "unknown")}
     day, result = earliest.astimezone(ap.TZ).date(), []
     while len(result) < count:
         when = dt.datetime.combine(day, POST_TIME, ap.TZ)
-        if day.weekday() in WEEKDAYS and when >= earliest:
+        if day.weekday() in WEEKDAYS and day not in taken and when >= earliest:
             result.append(when)
         day += dt.timedelta(days=1)
     return result
