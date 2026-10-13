@@ -18,7 +18,7 @@ class WeeklyTests(unittest.TestCase):
         current = dt.datetime(2026, 10, 30, 18, tzinfo=ap.TZ)
         result = yt.slots([], 6, current)
         self.assertEqual([x.weekday() for x in result], [0, 2, 4, 0, 2, 4])
-        self.assertTrue(all(x.hour == 17 for x in result))
+        self.assertTrue(all((x.hour, x.minute) == (5, 30) for x in result))
         self.assertTrue(all(x.utcoffset() == dt.timedelta(hours=-7) for x in result))
 
     def test_existing_schedule_and_half_hour_lead_time(self):

@@ -16,5 +16,5 @@ The owner can disconnect YouTube in Post for Me or revoke its access through [Go
 
 ### How PURSUIT currently uses YouTube
 
-**As of October 7, 2026, automatic YouTube Shorts scheduling is enabled in the local deployment.** Post for Me is connected to **PURSUIT with Anya Postnikov (@AnyaPostnikov)**, pinned by channel ID `UCkw_7bkF1qSRrupIvN4SIAg`. Quality-approved Shorts are scheduled on **Monday, Wednesday, and Friday at 5 PM America/Denver**, independently of TikTok's three-per-day schedule. Up to three Shorts are submitted ahead, and empty slots are skipped. Creating clips happens locally; publishing uses the connected YouTube authorization. Optional Drive review delivery remains available separately.
+**As of October 7, 2026, automatic YouTube Shorts scheduling is enabled in the local deployment.** Post for Me is connected to **PURSUIT with Anya Postnikov (@AnyaPostnikov)**, pinned by channel ID `UCkw_7bkF1qSRrupIvN4SIAg`. Quality-approved Shorts are scheduled on **Monday, Wednesday, and Friday at 5:30 AM America/Denver**, independently of TikTok's three-per-day schedule. Up to three Shorts are submitted ahead, and empty slots are skipped. Creating clips happens locally; publishing uses the connected YouTube authorization. Optional Drive review delivery remains available separately.
 

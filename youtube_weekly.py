@@ -5,7 +5,7 @@ from pathlib import Path
 import autopilot as ap
 
 WEEKDAYS = (0, 2, 4)
-POST_HOUR = 17
+POST_TIME = dt.time(5, 30)
 SCHEDULE_AHEAD = 3
 LEDGER_FILE = ap.STATE_DIR / "youtube-weekly-ledger.json"
 
@@ -18,7 +18,7 @@ def slots(posts, count, current=None):
                                      for p in posts) + dt.timedelta(minutes=1))
     day, result = earliest.astimezone(ap.TZ).date(), []
     while len(result) < count:
-        when = dt.datetime.combine(day, dt.time(POST_HOUR), ap.TZ)
+        when = dt.datetime.combine(day, POST_TIME, ap.TZ)
         if day.weekday() in WEEKDAYS and when >= earliest:
             result.append(when)
         day += dt.timedelta(days=1)
@@ -128,4 +128,4 @@ def fill_schedule():
         ap.save(LEDGER_FILE, ledger)
         ap.log(f"YouTube Short scheduled: {record['clip']} for {when:%a %b %d %H:%M}")
         count += 1
-    return f"YouTube weekly: {count} Short(s) added; Monday/Wednesday/Friday at 17:00."
+    return f"YouTube weekly: {count} Short(s) added; Monday/Wednesday/Friday at 05:30."

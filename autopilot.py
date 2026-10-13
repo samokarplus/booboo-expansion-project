@@ -1004,7 +1004,7 @@ def write_status(extra=""):
     lines.append(f"Auto-posting: {'ON' if cfg.get('auto_posting') else 'OFF (run the one-clip live test first)'}")
     if (cfg.get("youtube_weekly") or {}).get("enabled"):
         yt_posts = load(STATE_DIR / "youtube-weekly-ledger.json", {"posts": []})["posts"]
-        lines.append("YouTube Shorts: ON, Monday/Wednesday/Friday at 17:00 America/Denver")
+        lines.append("YouTube Shorts: ON, Monday/Wednesday/Friday at 05:30 America/Denver")
         for p in yt_posts:
             if p["status"] in ("scheduled", "unknown"):
                 lines.append(f"  YouTube [{p['status']}] {dt.datetime.fromisoformat(p['scheduled_at']).astimezone(TZ):%a %b %d %H:%M}  {p['clip']}")

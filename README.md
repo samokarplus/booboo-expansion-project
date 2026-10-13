@@ -33,7 +33,7 @@ Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing)
 | --- | --- | --- |
 | Original YouTube episode | Human upload; source for the program | Record/edit and upload the original episode |
 | TikTok `@pursuitthepod` | Automatic posting enabled; up to 3/day at 9 AM, 3 PM and 9 PM Denver time | Maintain account connection and review results; no routine clip upload |
-| YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5 PM Denver time | Maintain connection; set Related video in YouTube Studio when wanted |
+| YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5:30 AM Denver time | Maintain connection; set Related video in YouTube Studio when wanted |
 | Spotify | **Backfill complete:** 60 of 60 YouTube videos are published as video episodes with their original YouTube dates (Oct 8, 2026) | Future uploads still need the assisted dashboard flow; no automatic YouTube-to-Spotify copy exists yet |
 | Google Drive | Optional review delivery enabled; previous test verified | Review/download copies if useful; refresh Google login if it expires |
 
@@ -254,7 +254,7 @@ Install the LaunchAgent after setup and testing:
 
 It checks the PURSUIT YouTube channel six times per day. New episodes jump ahead of the older catalog. When the approved buffer needs content, the scheduled worker can process another back-catalog episode roughly every three hours; it pauses backlog processing when roughly four days of approved clips are already waiting.
 
-After the controlled live-post gate has succeeded and unattended TikTok posting is enabled, the target is up to three TikTok posts per day at **09:00, 15:00, and 21:00 America/Denver**. Separately, YouTube weekly publishing is enabled for **PURSUIT with Anya Postnikov (@AnyaPostnikov)** on **Monday, Wednesday, and Friday at 17:00 America/Denver**. A slot is skipped rather than publishing a clip that did not pass quality control. The queue is an internal reliability mechanism and does not require daily manual management.
+After the controlled live-post gate has succeeded and unattended TikTok posting is enabled, the target is up to three TikTok posts per day at **09:00, 15:00, and 21:00 America/Denver**. Separately, YouTube weekly publishing is enabled for **PURSUIT with Anya Postnikov (@AnyaPostnikov)** on **Monday, Wednesday, and Friday at 05:30 America/Denver**. A slot is skipped rather than publishing a clip that did not pass quality control. The queue is an internal reliability mechanism and does not require daily manual management.
 
 ```bash
 ./autopilot status
