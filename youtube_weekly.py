@@ -17,9 +17,10 @@ RETRYABLE_ERROR_PATTERNS = ("429", "quota exceeded", "ratelimitexceeded", "resou
 def slots(posts, count, current=None):
     current = current or ap.now()
     earliest = current + dt.timedelta(minutes=30)
-    if posts:
+    live = [p for p in posts if p.get("status") in ("scheduled", "unknown")]
+    if live:  # failed/retry entries must not push new slots behind the whole buffer
         earliest = max(earliest, max(dt.datetime.fromisoformat(p["scheduled_at"])
-                                     for p in posts) + dt.timedelta(minutes=1))
+                                     for p in live) + dt.timedelta(minutes=1))
     day, result = earliest.astimezone(ap.TZ).date(), []
     while len(result) < count:
         when = dt.datetime.combine(day, POST_TIME, ap.TZ)
@@ -75,16 +76,53 @@ def quota_retryable(error):
 def retire_remote_post(post):
     if not post.get("post_id"):
         return
-    ap.api("DELETE", f"/v1/social-posts/{post['post_id']}")
+    try:
+        ap.api("DELETE", f"/v1/social-posts/{post['post_id']}")
+    except (ap.Stop, ap.Ambiguous, ap.Transient) as e:  # processed posts cannot be deleted; the retry gets a new ID anyway
+        ap.log(f"YouTube weekly: could not delete failed remote post {post['post_id']} ({e}); continuing")
 
 
 def local_scheduled_at(remote):
     return dt.datetime.fromisoformat(remote["scheduled_at"].replace("Z", "+00:00")).astimezone(ap.TZ).isoformat()
 
 
+def freshness(item):
+    """Small boost so clips from the newest episodes lead, as with TikTok."""
+    try:
+        age = (ap.now().date() - dt.datetime.strptime(str(item["meta"]["upload_date"]), "%Y%m%d").date()).days
+    except (KeyError, ValueError, TypeError):
+        return 0
+    return 10 if age <= 14 else 0
+
+
+def adopt_orphans(ledger, account_id, queue):
+    """Record remote YouTube-weekly posts missing from the local ledger so buffers and slots stay accurate."""
+    known = {p["external_id"] for p in ledger["posts"]}
+    by_base = {external_id(i): i for i in queue.get("clips", [])}
+    offset = 0
+    for _ in range(10):
+        r = ap.api("GET", "/v1/social-posts", query={"limit": 100, "offset": offset})
+        for post in r.get("data", []):
+            eid = post.get("external_id") or ""
+            base = base_external_id(eid)
+            if eid in known or not base.endswith("-youtube-weekly") or post.get("status") != "scheduled":
+                continue
+            item = by_base.get(base)
+            ledger["posts"].append({
+                "external_id": eid, "status": "scheduled", "post_id": post["id"],
+                "scheduled_at": local_scheduled_at(post),
+                "episode": item["episode"] if item else "", "clip": item["clip"]["folder"] if item else base,
+                "start_sec": float(item["clip"]["start_sec"]) if item else 0.0,
+                "end_sec": float(item["clip"]["end_sec"]) if item else 0.0, "adopted": True})
+            known.add(eid)
+        offset += 100
+        if not (r.get("meta") or {}).get("next"):
+            break
+
+
 def candidates(queue, posts):
     result = []
-    for item in sorted(queue["clips"], key=lambda q: -q["score"]):
+    for item in sorted(queue["clips"], key=lambda q: -(q["score"] + freshness(q))):
         clip = item["clip"]
         base_id = external_id(item)
         if item["status"] not in ("queued", "scheduled") or \
@@ -159,6 +197,11 @@ def fill_schedule():
     account = verified_account(settings)
     ledger = ap.load(LEDGER_FILE, {"posts": []})
     reconcile(ledger, account["id"])
+    try:
+        adopt_orphans(ledger, account["id"], ap.load(ap.QUEUE_FILE, {"clips": []}))
+        ap.save(LEDGER_FILE, ledger)
+    except (ap.Stop, ap.Ambiguous, ap.Transient) as e:
+        ap.log(f"YouTube weekly: remote schedule inventory skipped ({e})")
     ahead = sum(p["status"] in ("scheduled", "unknown") and
                 dt.datetime.fromisoformat(p["scheduled_at"]) > ap.now() for p in ledger["posts"])
     count = 0

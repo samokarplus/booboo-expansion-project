@@ -580,7 +580,7 @@ class ShortsDeliveryTests(unittest.TestCase):
                 patch.object(ap, "fill_schedule", lambda: 0), \
                 patch.object(ap, "check_new_episode", lambda a, s: None), \
                 patch.object(ap, "backlog_step", lambda *a, **k: ([], None)), \
-                patch.object(ap, "shorts_auto_step", side_effect=sd.DriveError("sign-in expired")):
+                patch.object(sd, "auto_step", side_effect=sd.DriveError("sign-in expired")):
             ap.cmd_run(args)
         status = ap.STATUS_FILE.read_text()
         self.assertIn("YouTube weekly: ok", status)

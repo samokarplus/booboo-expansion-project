@@ -230,11 +230,16 @@ def upload_media(mp4):
     if not r.get("upload_url") or not r.get("media_url"):
         raise Stop("Post for Me returned an incomplete upload-url response.")
     # curl streams the file and gives a clean exit code; -f fails on HTTP errors
-    up = subprocess.run(["curl", "-sS", "-f", "-X", "PUT", "-H", "Content-Type: video/mp4",
-                         "--upload-file", str(mp4), r["upload_url"]], capture_output=True, text=True, timeout=900)
-    if up.returncode != 0:
-        raise Stop(f"Uploading {mp4.name} failed: {up.stderr.strip()[:300]}")
-    return r["media_url"]
+    for attempt in range(3):  # HTTP/1.1 and retries: large uploads have hit HTTP/2 stream errors and stalls
+        try:
+            up = subprocess.run(["curl", "-sS", "-f", "--http1.1", "-X", "PUT", "-H", "Content-Type: video/mp4",
+                                 "--upload-file", str(mp4), r["upload_url"]],
+                                capture_output=True, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            up = None
+        if up is not None and up.returncode == 0:
+            return r["media_url"]
+    raise Stop(f"Uploading {mp4.name} failed after 3 attempts: {(up.stderr.strip()[:300] if up else 'timed out')}")
 
 
 def connected_accounts():
@@ -1060,15 +1065,12 @@ def cmd_run(args, only_url=None):
             extra = process_episode(ep, state, args.dry_run, not args.no_claude_qc, fresh=False)
             return
         live = not args.dry_run
-        steps = [("YouTube weekly", lambda: youtube_weekly_step() if live else None),
-                 ("posts", lambda: (reconcile(), None)[1] if live and load(LEDGER_FILE, {"posts": []})["posts"] else None),
+        steps = [("posts", lambda: (reconcile(), None)[1] if live and load(LEDGER_FILE, {"posts": []})["posts"] else None),
                  ("new episode", lambda: check_new_episode(args, state)),
                  ("YouTube weekly", lambda: youtube_weekly_step() if live else None),
                  ("scheduling", lambda: schedule_msg(fill_schedule()) if live else None),
                  ("back catalog", lambda: backlog_msg(*backlog_step(state, BACKLOG_PER_RUN, not args.no_claude_qc))
                  if live and load(CONFIG_FILE, {}).get("backlog", True) else None),
-                 ("YouTube weekly", lambda: youtube_weekly_step() if live else None),
-                 ("scheduling", lambda: schedule_msg(fill_schedule()) if live else None),
                  ("shorts delivery", lambda: shorts_auto_step() if live else None),
                  ("podcast distribution", lambda: podcast_step() if live else None)]
         lines = []
@@ -1081,10 +1083,6 @@ def cmd_run(args, only_url=None):
                 lines.append(f"{name}: waiting ({e})")
                 log(lines[-1])
             except (Stop, Ambiguous) as e:
-                if name == "shorts delivery" and e.__class__.__name__ == "DriveError":
-                    lines.append(f"{name}: optional Google Drive delivery skipped ({e})")
-                    log(lines[-1])
-                    continue
                 lines.append(f"{name}: STOPPED (nothing questionable was posted): {e}")
                 notify("PURSUIT autopilot stopped", f"{name}: {str(e).splitlines()[0]}")
                 log(lines[-1])
@@ -1118,7 +1116,13 @@ def youtube_weekly_step():
 def shorts_auto_step():
     """Manual-YouTube-Shorts delivery to Google Drive (separate module and state; off until enabled)."""
     import shorts_delivery
-    return shorts_delivery.auto_step()
+    try:
+        return shorts_delivery.auto_step()
+    except Exception as e:  # DriveError subclasses a separately imported Stop when run as __main__
+        if e.__class__.__name__ == "DriveError":
+            log(f"shorts delivery: optional Google Drive delivery skipped ({e})")
+            return f"shorts delivery: optional Google Drive delivery skipped ({e})"
+        raise
 
 
 def podcast_step():

@@ -16,6 +16,9 @@ import youtube_weekly as yt
 class WeeklyTests(unittest.TestCase):
     def setUp(self):
         yt.LEDGER_FILE.unlink(missing_ok=True)
+        patcher = patch.object(yt, "adopt_orphans")
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def queue_item(self):
         ep_dir = TEST_DIR / "episode"
@@ -48,7 +51,7 @@ class WeeklyTests(unittest.TestCase):
         current = dt.datetime(2026, 10, 7, 16, 45, tzinfo=ap.TZ)
         first = yt.slots([], 1, current)[0]
         self.assertEqual(first.date(), dt.date(2026, 10, 9))
-        following = yt.slots([{"scheduled_at": first.isoformat()}], 1, current)[0]
+        following = yt.slots([{"status": "scheduled", "scheduled_at": first.isoformat()}], 1, current)[0]
         self.assertEqual(following.date(), dt.date(2026, 10, 12))
 
     def test_wrong_channel_is_rejected_even_with_same_name(self):
