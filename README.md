@@ -17,7 +17,7 @@ PURSUIT's distribution program turns Anya's YouTube episodes into captioned TikT
 | Google Drive | Optional review copies of Shorts | $0 extra with sufficient storage |
 | GitHub | Stores code, history and these instructions | $0 extra required |
 
-**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled. **Spotify is caught up:** all 60 YouTube videos are on Spotify as video episodes with matching dates (finished Oct 8, 2026). **New episodes are NOT copied to Spotify automatically yet**; each new one still needs the assisted dashboard upload. Spotify hosting preserves monetization eligibility, not guaranteed earnings. Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
+**Your normal job:** upload the original to YouTube and keep the Mac awake/online. TikTok and weekly Shorts are enabled: **3 YouTube Shorts a week (Mon/Wed/Fri, 5:00 AM Denver)** are picked from the best clips of new episodes and queued up to ~4 weeks ahead in Post for Me, so they keep publishing even if the Mac is off. If YouTube rejects an upload for quota, the clip is retried on a later slot (up to 3 times). **Spotify is caught up:** all 60 YouTube videos are on Spotify as video episodes with matching dates (finished Oct 8, 2026). **New episodes are NOT copied to Spotify automatically yet**; each new one still needs the assisted dashboard upload. Spotify hosting preserves monetization eligibility, not guaranteed earnings. Cloudflare publishing is OFF. Shorts' Related video is optional and manual.
 
 Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing), [Cloudflare](https://developers.cloudflare.com/r2/pricing/). Detailed costs, schedules, setup and responsibilities are below.
 
@@ -27,13 +27,13 @@ Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing)
 
 ### Current Deployment
 
-**Where we are, October 8, 2026:**
+**Where we are, October 13, 2026:**
 
 | Destination | Current live Mac setting | What you do |
 | --- | --- | --- |
 | Original YouTube episode | Human upload; source for the program | Record/edit and upload the original episode |
 | TikTok `@pursuitthepod` | Automatic posting enabled; up to 3/day at 9 AM, 3 PM and 9 PM Denver time | Maintain account connection and review results; no routine clip upload |
-| YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5:00 AM Denver time | Maintain connection; set Related video in YouTube Studio when wanted |
+| YouTube Shorts `@AnyaPostnikov` | Weekly publisher enabled; up to 3/week, Mon/Wed/Fri at 5:00 AM Denver time, queued ~4 weeks ahead; quota failures auto-retry | Maintain connection; set Related video in YouTube Studio when wanted |
 | Spotify | **Backfill complete:** 60 of 60 YouTube videos are published as video episodes with their original YouTube dates (Oct 8, 2026) | Future uploads still need the assisted dashboard flow; no automatic YouTube-to-Spotify copy exists yet |
 | Google Drive | Optional review delivery enabled; previous test verified | Review/download copies if useful; refresh Google login if it expires |
 
