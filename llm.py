@@ -8,7 +8,7 @@ Settings (all optional environment variables):
   PURSUIT_LLM=codex|claude          which one goes first (default: codex)
   PURSUIT_LLM_FALLBACK=claude|none  who to try if the first one is unavailable. Default: none, so Claude is NEVER
                                     used unless you set this to claude (or PURSUIT_LLM=claude).
-  PURSUIT_CODEX_MODEL=<name>        override the Codex model (default: whatever `codex` is configured to use)
+  PURSUIT_CODEX_MODEL=<name>        override the Codex model (default: gpt-6.1-sol; isolated from desktop defaults)
   PURSUIT_MODEL=<name>              override the Claude model (existing setting)
   PURSUIT_ALLOW_CODEX_API_KEY=1     allow a Codex login that bills an API key (off: refused)
 """
@@ -120,8 +120,8 @@ class Codex:
                 cmd += [f"--image={image}"]
             cmd += ["--skip-git-repo-check", "--ephemeral", "--sandbox", "read-only", "--color", "never",
                     "--output-last-message", str(out), "-C", tmp]
-            if os.environ.get("PURSUIT_CODEX_MODEL"):
-                cmd += ["--model", os.environ["PURSUIT_CODEX_MODEL"]]
+            # Do not inherit a retired desktop model (GPT-5.5 failed in the recovery run).
+            cmd += ["--model", os.environ.get("PURSUIT_CODEX_MODEL") or "gpt-6.1-sol"]
             cmd += ["-"]    # prompt comes from stdin
             try:
                 r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, cwd=tmp, timeout=timeout,
@@ -184,8 +184,11 @@ class Claude:
         with tempfile.TemporaryDirectory(prefix="pursuit_claude_") as tmp:
             cmd = [exe, "-p", "--output-format", "json", "--no-session-persistence"]
             if image:
-                shutil.copy(image, Path(tmp) / Path(image).name)
+                dest = Path(tmp) / Path(image).name
+                shutil.copy(image, dest)
                 cmd += ["--tools", "Read", "--allowedTools", "Read", "--add-dir", tmp]
+                # Claude only sees the picture if the prompt tells it where the file is and to open it.
+                prompt = f"The image to inspect is the file {dest}. Open it with the Read tool first, then answer.\n\n{prompt}"
             else:
                 cmd += ["--tools", ""]
             if os.environ.get("PURSUIT_MODEL"):

@@ -23,7 +23,7 @@ printf '%s' "${FAKE_CODEX_REPLY:-{\"ok\": true}}" > "$out"
 FAKE_CLAUDE = r'''#!/bin/bash
 echo "$@" >> "$FAKE_DIR/claude_args.log"
 if [ "$1" = "auth" ]; then echo '{"loggedIn": true}'; exit 0; fi
-cat > /dev/null
+cat >> "$FAKE_DIR/claude_stdin.txt"
 echo '{"is_error": false, "result": "from claude"}'
 '''
 
@@ -57,6 +57,7 @@ class LLMTests(unittest.TestCase):
     def test_codex_is_used_first_with_safe_flags_and_prompt_on_stdin(self):
         self.assertEqual(llm.ask("pick clips", timeout=20), '{"ok": true}')
         args = self.read("codex_args.log")
+        self.assertIn("--model gpt-6.1-sol", self.read("codex_args.log"))
         for flag in ("exec", "--sandbox read-only", "--ephemeral", "--skip-git-repo-check", "--output-last-message"):
             self.assertIn(flag, args)
         self.assertEqual(self.read("codex_stdin.txt"), "pick clips")
@@ -72,6 +73,17 @@ class LLMTests(unittest.TestCase):
         img.write_bytes(b"jpg")
         llm.ask("look", timeout=20, image=str(img))
         self.assertIn(f"--image={img}", self.read("codex_args.log"))
+
+    def test_claude_is_told_where_the_image_is_and_to_open_it(self):
+        img = self.dir / "sheet.jpg"
+        img.write_bytes(b"jpg")
+        with patch.dict(os.environ, {"PURSUIT_LLM": "claude"}):
+            llm.ask("check the framing", timeout=20, image=str(img))
+        sent = self.read("claude_stdin.txt")
+        self.assertIn("sheet.jpg", sent)
+        self.assertIn("Read tool", sent)
+        self.assertIn("check the framing", sent)
+        self.assertIn("--allowedTools Read", self.read("claude_args.log"))
 
     def test_default_never_switches_to_claude(self):
         with patch.dict(os.environ, {"FAKE_CODEX_ERR": "You've hit your usage limit."}):
