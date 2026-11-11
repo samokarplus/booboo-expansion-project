@@ -378,15 +378,15 @@ def analyze(meta, transcript, work, mode):
 
 
 MIN_GOOD_CANDIDATES = 3      # ask the AI once more if fewer than this many clips are 20-60 seconds
-LENGTH_SLACK_SEC = 1.0       # snapping to word boundaries can move a cut by about a second
+PICK_MIN_SEC, PICK_MAX_SEC = 21, 58   # tighter than 20-60: snapping to word boundaries can stretch a cut by a couple of seconds
 
 
 def split_by_length(data):
-    """(analysis with only 20-60 second clips, list of the clips dropped for length)."""
+    """(analysis with only 21-58 second picks so the final cut is 20-60, list of the clips dropped for length)."""
     good, bad = [], []
     for clip in data["clips"]:
         span = clip["end"] - clip["start"]
-        (good if 20 - LENGTH_SLACK_SEC <= span <= 60 + LENGTH_SLACK_SEC else bad).append(clip)
+        (good if PICK_MIN_SEC <= span <= PICK_MAX_SEC else bad).append(clip)
     return dict(data, clips=good), bad
 
 

@@ -29,7 +29,9 @@ Prices checked October 8, 2026: [Post for Me](https://www.postforme.dev/pricing)
 - **Clip choice:** the best-scoring clips that passed quality checks, with a boost for episodes from the last 14 days.
 - **Runs without the Mac:** the autopilot queues up to 12 Shorts (about 4 weeks) in Post for Me. Once queued, they publish even if the Mac is off. The Mac is only needed to render new episodes and top up the queue; it checks at 07:15, 10:15, 13:15, 16:15, 19:15 and 22:15.
 - **If YouTube rejects an upload:** Post for Me shares one Google project quota across customers, and it rejected two late-day uploads (Oct 9 and 12). The tool now retries quota failures on the next free slot, up to 3 times, and notifies on other failures.
-- **Known limits:** the Oct 9 and 12 failed Shorts were not retried. TikTok now keeps a clip's file until YouTube has used it (or 30 days pass). A Google Drive sign-in expiry is skipped, not fatal. **Spotify video uploads are still manual.**
+- **Known limits:** Google Drive sign-in has expired, so optional Drive copies are skipped. **Spotify video uploads are still manual.** Clips from before Nov 11 may be re-picked.
+- **Nov 11 update:** clips are 20–60 seconds only. Claude picks and checks clips; Codex is the backup. The whole library (up to a year) is eligible. About 3 TikToks a day are scheduled a week ahead on Post for Me, so posts go out even if the Mac is off. See `CHANGELOG.md`.
+- **Health:** `AUTOPILOT_STATUS.txt` shows the buffer in days and the last good run of each step. A notification fires only for real stalls (3 failed runs in a row, or a nearly empty buffer).
 
 ## Deep Dive
 
@@ -136,6 +138,7 @@ If the ChatGPT desktop app is installed, its bundled Codex CLI is found automati
 All model calls (transcript analysis, clip selection, scoring, titles/captions/hashtags, and the final visual quality check) go through one file, `llm.py`. The prompts, `MIN_POST_SCORE`, and every other threshold and safety check are unchanged.
 
 - **Codex uses your ChatGPT subscription**, not the billed OpenAI API. API-key environment variables (`OPENAI_API_KEY`, `CODEX_API_KEY`) are removed from every Codex call, and a Codex login that uses an API key is refused. If the ChatGPT desktop app is installed, its bundled Codex CLI is found automatically.
+- **Update Nov 11, 2026: the live Mac now uses Claude first and Codex as backup** (set in the LaunchAgent). The default below is the original design.
 - **Claude is optional and OFF by default.** It is never used automatically. To use it as a fallback when Codex is unavailable, set `PURSUIT_LLM_FALLBACK=claude`; to make it the first choice, set `PURSUIT_LLM=claude`.
 - **Usage limit or outage:** the run stops cleanly and tries again on a later run. The episode's retry attempts are not used, and nothing is published without the quality check.
 - **Health checks cost nothing:** `codex login status` is used instead of a model call.

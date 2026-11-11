@@ -1041,6 +1041,66 @@ def backlog_step(state, limit, use_claude=True):
     return msgs, left
 
 
+HEALTH_FILE = STATE_DIR / "health.json"
+STALL_AFTER_FAILED_RUNS = 3     # same step failing this many runs in a row = a real stall (about 9 hours)
+LOW_BUFFER_POSTS = 3            # fewer than this many future TikTok posts scheduled = about a day left
+CORE_STEPS = ("scheduling", "posts")
+
+
+def record_step(name, ok, detail=""):
+    """Remember when each step last worked and how many runs in a row it has failed."""
+    h = load(HEALTH_FILE, {"steps": {}, "alerted": {}})
+    st = h["steps"].setdefault(name, {})
+    st["last_run"] = now().isoformat()
+    if ok:
+        st["last_ok"], st["fail_streak"], st["detail"] = now().isoformat(), 0, ""
+    else:
+        st["fail_streak"] = st.get("fail_streak", 0) + 1
+        st["detail"] = str(detail).splitlines()[0][:160] if detail else ""
+    save(HEALTH_FILE, h)
+
+
+def health_report():
+    """(lines for the status file, list of genuine problems). Only real stalls count as problems."""
+    h = load(HEALTH_FILE, {"steps": {}, "alerted": {}})
+    ledger = load(LEDGER_FILE, {"posts": []})
+    future = [p for p in ledger["posts"] if p["status"] in ("scheduled", "unknown")
+              and dt.datetime.fromisoformat(p["scheduled_at"]) > now()]
+    yt = [p for p in load(STATE_DIR / "youtube-weekly-ledger.json", {"posts": []})["posts"]
+          if p["status"] in ("scheduled", "unknown") and dt.datetime.fromisoformat(p["scheduled_at"]) > now()]
+    waiting = sum(1 for q in load(QUEUE_FILE, {"clips": []})["clips"] if q["status"] == "queued")
+    lines = [f"TikTok buffer: {len(future)} posts scheduled = about {len(future) / len(POST_HOURS):.1f} days",
+             f"YouTube Shorts buffer: {len(yt)} scheduled (3 a week) = about {len(yt) / 3:.1f} weeks",
+             f"Approved clips waiting: {waiting}"]
+    problems = []
+    if len(future) < LOW_BUFFER_POSTS:
+        problems.append(f"TikTok buffer is nearly empty ({len(future)} posts left).")
+    for name, st in sorted(h["steps"].items()):
+        ok = st.get("last_ok")
+        lines.append(f"  {name}: last ok {dt.datetime.fromisoformat(ok):%a %b %d %H:%M}" if ok else f"  {name}: never ok yet")
+        if st.get("fail_streak", 0) >= STALL_AFTER_FAILED_RUNS:
+            problems.append(f"'{name}' has failed {st['fail_streak']} runs in a row: {st.get('detail', '')}")
+        elif name in CORE_STEPS and ok and now() - dt.datetime.fromisoformat(ok) > dt.timedelta(hours=30):
+            problems.append(f"'{name}' has not worked for over 30 hours.")
+    return lines, problems
+
+
+def alert_on_stalls():
+    """macOS notification for each genuine problem, at most once a day per problem. Routine hiccups stay quiet."""
+    try:
+        _, problems = health_report()
+        h = load(HEALTH_FILE, {"steps": {}, "alerted": {}})
+        for msg in problems:
+            last = h["alerted"].get(msg)
+            if not last or now() - dt.datetime.fromisoformat(last) > dt.timedelta(hours=24):
+                notify("PURSUIT autopilot needs attention", msg)
+                h["alerted"][msg] = now().isoformat()
+        h["alerted"] = {m: t for m, t in h["alerted"].items() if m in problems}
+        save(HEALTH_FILE, h)
+    except Exception as e:      # health reporting must never break a run
+        log(f"health check skipped: {e!r}")
+
+
 def write_status(extra=""):
     ledger = load(LEDGER_FILE, {"posts": []})
     state = load(STATE_FILE, {})
@@ -1063,6 +1123,8 @@ def write_status(extra=""):
     lines.append(f"Episodes processed: {sum(1 for e in eps.values() if e.get('status') == 'queued')} queued, "
                  f"{sum(1 for e in eps.values() if e.get('status') == 'rejected')} rejected")
     lines.append(f"Last processed episode: {state.get('last_processed_video_id', '(none yet)')}")
+    health, problems = health_report()
+    lines += ["", "Health:" + ("  *** NEEDS ATTENTION ***" if problems else "  OK")] + [f"  ! {m}" for m in problems] + health
     lines += ["", f"Approved queue ({len(queue)} clips, best first):"]
     for q in sorted(queue, key=lambda q: -q["score"])[:15]:
         lines.append(f"  {q['score']:>3.0f}  {q['clip']['folder'][:50]:50}  [{q['episode_title'][:40]}]")
@@ -1126,13 +1188,20 @@ def cmd_run(args, only_url=None):
                 msg = step()
                 if msg:
                     lines.append(msg)
-            except Transient as e:
+                if live:
+                    record_step(name, True)
+            except Transient as e:      # e.g. the AI is at its usage limit: retried next run; only a long streak is flagged
                 lines.append(f"{name}: waiting ({e})")
                 log(lines[-1])
+                if live:
+                    record_step(name, False, e)
             except (Stop, Ambiguous) as e:
                 lines.append(f"{name}: STOPPED (nothing questionable was posted): {e}")
-                notify("PURSUIT autopilot stopped", f"{name}: {str(e).splitlines()[0]}")
                 log(lines[-1])
+                if live:
+                    record_step(name, False, e)
+        if live:
+            alert_on_stalls()
         extra = "\n".join(lines)
     except Stop as e:
         extra = f"STOPPED (nothing questionable was posted): {e}"

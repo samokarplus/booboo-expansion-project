@@ -17,4 +17,6 @@ Short, plain notes. Newest first.
 - **AI must give 20–60s clips.** Out-of-range clips are dropped before rendering; the AI gets one more try if under 3 are left.
 - **One bad upload no longer blocks the rest.** A clip that fails to upload is skipped, then retired after 3 runs.
 - **Clips moved off the Desktop.** The background job can't read the Desktop, so old clips failed to upload for weeks. They now live in the autopilot folder.
-- **Tests:** 170 pass.
+- **Health check.** Status file shows days of buffer and each step's last good run. Alerts only for real stalls: 3 failed runs in a row, or almost no posts left.
+- **Picks stay 21–58s** so the final cut lands inside 20–60s.
+- **Tests:** 171 pass.

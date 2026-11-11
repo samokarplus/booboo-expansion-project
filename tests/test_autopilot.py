@@ -327,6 +327,34 @@ class AutopilotTests(unittest.TestCase):
         bad = [q for q in ap.load(ap.QUEUE_FILE, {})["clips"] if "clip-0" in q["clip"]["file"]]
         self.assertTrue(bad and all(q["status"] == "failed" for q in bad))
 
+    def test_health_flags_only_genuine_stalls_and_alerts_once_a_day(self):
+        self.tiktok_only()
+        notes = []
+        real = ap.notify
+        ap.notify = lambda title, msg: notes.append(msg)
+        try:
+            ap.save(ap.LEDGER_FILE, {"posts": [
+                {"external_id": f"x{i}", "status": "scheduled", "scheduled_at": (ap.now() + dt.timedelta(days=1, hours=i)).isoformat()}
+                for i in range(6)]})
+            ap.record_step("scheduling", False, "boom")
+            ap.record_step("scheduling", False, "boom")
+            ap.alert_on_stalls()
+            self.assertEqual(notes, [])                          # two failures in a row is not a stall yet
+            ap.record_step("scheduling", False, "boom")
+            ap.alert_on_stalls()
+            ap.alert_on_stalls()
+            self.assertEqual(len(notes), 1)                      # third failure: one alert, not one per call
+            self.assertIn("scheduling", notes[0])
+            ap.record_step("scheduling", True)
+            ap.alert_on_stalls()
+            lines, problems = ap.health_report()
+            self.assertEqual(problems, [])                       # recovered
+            self.assertTrue(any("TikTok buffer: 6 posts" in l for l in lines))
+            ap.save(ap.LEDGER_FILE, {"posts": []})
+            self.assertTrue(any("nearly empty" in m for m in ap.health_report()[1]))
+        finally:
+            ap.notify = real
+
     def test_queue_never_holds_duplicates(self):
         self.queue_two_episodes()
         self.queue_two_episodes()
