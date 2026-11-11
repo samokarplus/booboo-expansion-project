@@ -301,6 +301,32 @@ class AutopilotTests(unittest.TestCase):
         queue = ap.load(ap.QUEUE_FILE, {})
         self.assertFalse([q for q in queue["clips"] if "clip-0" in q["clip"]["file"] and q["status"] != "removed"])
 
+    def test_a_clip_that_cannot_upload_is_skipped_then_retired_and_does_not_block_others(self):
+        self.tiktok_only()
+        cfg = ap.load(ap.CONFIG_FILE, {})
+        ap.save(ap.CONFIG_FILE, dict(cfg, auto_posting=True))
+        self.queue_two_episodes()
+        real = ap.upload_media
+        def flaky(mp4):
+            if "clip-0" in str(mp4):
+                raise ap.MediaError("curl: (26) read error")
+            return real(mp4)
+        ap.upload_media = flaky
+        try:
+            for _ in range(3):
+                self.assertGreater(ap.fill_schedule(), 0)      # others still get scheduled
+                # reset the other clips so the next "run" tries the bad one again
+                queue = ap.load(ap.QUEUE_FILE, {})
+                for q in queue["clips"]:
+                    if q["status"] == "scheduled":
+                        q["status"] = "queued"
+                ap.save(ap.QUEUE_FILE, queue)
+                ap.save(ap.LEDGER_FILE, {"posts": []})
+        finally:
+            ap.upload_media = real
+        bad = [q for q in ap.load(ap.QUEUE_FILE, {})["clips"] if "clip-0" in q["clip"]["file"]]
+        self.assertTrue(bad and all(q["status"] == "failed" for q in bad))
+
     def test_queue_never_holds_duplicates(self):
         self.queue_two_episodes()
         self.queue_two_episodes()

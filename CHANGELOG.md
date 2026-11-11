@@ -14,4 +14,7 @@ Short, plain notes. Newest first.
 - **Whole library is eligible.** Episodes up to a year old can be clipped, not just the last 30 days. Moving-video only.
 - **2 older episodes per run** (was 1) while the backlog fills.
 - **Low-disk guard.** Heavy work waits if the Mac has under 3 GB free.
-- **Tests:** 165 pass.
+- **AI must give 20–60s clips.** Out-of-range clips are dropped before rendering; the AI gets one more try if under 3 are left.
+- **One bad upload no longer blocks the rest.** A clip that fails to upload is skipped, then retired after 3 runs.
+- **Clips moved off the Desktop.** The background job can't read the Desktop, so old clips failed to upload for weeks. They now live in the autopilot folder.
+- **Tests:** 170 pass.

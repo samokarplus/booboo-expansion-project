@@ -350,17 +350,44 @@ def analyze(meta, transcript, work, mode):
             f"into any AI chat, save its JSON reply as\n  {out}\nand run the same command again.")
     log("Asking the AI to find the best moments (1–3 min)...")
     last_err = None
+    best = None
+    ask = prompt
     for attempt in range(2):
-        reply = ask_llm(prompt if attempt == 0 else
-                        prompt + "\n\nIMPORTANT: respond with ONLY the JSON object, nothing else.")
+        reply = ask_llm(ask)
         try:
             data = extract_json(reply)
-            write_json_atomic(out, data, indent=2)
-            return data
         except (ValueError, json.JSONDecodeError) as e:
             last_err = e
             write_text_atomic(work / "llm_reply_unparsed.txt", reply)
-    raise Fail(f"Couldn't read the AI's reply as JSON ({last_err}). Raw reply saved in {work}.")
+            ask = prompt + "\n\nIMPORTANT: respond with ONLY the JSON object, nothing else."
+            continue
+        good, bad = split_by_length(data)
+        if best is None or len(good["clips"]) > len(best["clips"]):
+            best = good
+        if len(best["clips"]) >= MIN_GOOD_CANDIDATES:
+            break
+        spans = ", ".join(f"{c['start']:.0f}-{c['end']:.0f}s ({c['end'] - c['start']:.0f}s long)" for c in bad)
+        ask = (prompt + "\n\nIMPORTANT: respond with ONLY the JSON object. Every clip must be between 20 and 60 seconds "
+               "long (end minus start). " + (f"These were out of range and are dropped: {spans}. " if spans else "")
+               + "Look again for more strong 20-60 second moments and return the full list.")
+    if best and best["clips"]:
+        write_json_atomic(out, best, indent=2)
+        return best
+    raise Fail(f"Couldn't get usable 20-60 second clips from the AI ({last_err or 'none were in range'}). "
+               f"Raw reply saved in {work}.")
+
+
+MIN_GOOD_CANDIDATES = 3      # ask the AI once more if fewer than this many clips are 20-60 seconds
+LENGTH_SLACK_SEC = 1.0       # snapping to word boundaries can move a cut by about a second
+
+
+def split_by_length(data):
+    """(analysis with only 20-60 second clips, list of the clips dropped for length)."""
+    good, bad = [], []
+    for clip in data["clips"]:
+        span = clip["end"] - clip["start"]
+        (good if 20 - LENGTH_SLACK_SEC <= span <= 60 + LENGTH_SLACK_SEC else bad).append(clip)
+    return dict(data, clips=good), bad
 
 
 # ----------------------------------------------------------------------------- 4. timing

@@ -31,6 +31,46 @@ class PursuitClipsTests(unittest.TestCase):
         broken_first = '{"clips":[{"start_note":"x"}]}\n' + good(20)
         self.assertEqual(pc.extract_json(broken_first)["clips"][0]["start"], 20.0)
 
+    def _reply(self, spans):
+        import json
+        return json.dumps({"clips": [{"start": a, "end": b, "start_words": "x", "end_words": "y", "overall": 80}
+                                     for a, b in spans]})
+
+    def _analyze_with(self, replies):
+        calls = []
+        def fake(prompt, timeout=900, image=None):
+            calls.append(prompt)
+            return replies[len(calls) - 1]
+        old_ask, old_avail = pc.ask_llm, pc.llm.available
+        pc.ask_llm, pc.llm.available = fake, lambda: True
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                work = Path(d)
+                return pc.analyze({"title": "t"}, {"segments": []}, work, "auto"), calls
+        finally:
+            pc.ask_llm, pc.llm.available = old_ask, old_avail
+
+    def test_analyze_drops_clips_outside_20_to_60_seconds(self):
+        spans = [(0, 30), (40, 70), (100, 140), (200, 210), (300, 400)]   # 30s, 30s, 40s ok; 10s, 100s dropped
+        data, calls = self._analyze_with([self._reply(spans)])
+        self.assertEqual([(c["start"], c["end"]) for c in data["clips"]], [(0, 30), (40, 70), (100, 140)])
+        self.assertEqual(len(calls), 1)
+
+    def test_analyze_asks_once_more_when_too_few_clips_are_in_range(self):
+        data, calls = self._analyze_with([self._reply([(0, 16), (20, 105)]),
+                                          self._reply([(0, 30), (50, 90), (120, 150)])])
+        self.assertEqual(len(data["clips"]), 3)
+        self.assertEqual(len(calls), 2)
+        self.assertIn("between 20 and 60 seconds", calls[1])
+
+    def test_analyze_keeps_the_good_clips_if_the_retry_is_worse(self):
+        data, calls = self._analyze_with([self._reply([(0, 30), (50, 90)]), self._reply([(0, 5)])])
+        self.assertEqual(len(data["clips"]), 2)
+
+    def test_analyze_fails_when_nothing_is_in_range(self):
+        with self.assertRaises(pc.Fail):
+            self._analyze_with([self._reply([(0, 5)]), self._reply([(0, 200)])])
+
     def test_snap_does_not_cut_into_first_or_next_word(self):
         words = [
             {"w": "before", "s": 0.0, "e": 0.95},

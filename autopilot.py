@@ -161,6 +161,10 @@ class Stop(Exception):
     """Fail-closed stop with a human message."""
 
 
+class MediaError(Stop):
+    """One clip's file could not be uploaded. Other clips can still be scheduled."""
+
+
 class Transient(Stop):
     """Temporarily unavailable (e.g. the AI or the internet). Nothing was attempted; try again next run."""
 
@@ -250,7 +254,7 @@ def upload_media(mp4):
             up = None
         if up is not None and up.returncode == 0:
             return r["media_url"]
-    raise Stop(f"Uploading {mp4.name} failed after 3 attempts: {(up.stderr.strip()[:300] if up else 'timed out')}")
+    raise MediaError(f"Uploading {mp4.name} failed after 3 attempts: {(up.stderr.strip()[:300] if up else 'timed out')}")
 
 
 def connected_accounts():
@@ -960,6 +964,22 @@ def schedule_from_queue(item, when, live_test=False):
     return done[0]
 
 
+MAX_UPLOAD_FAILURES = 3   # runs in which a clip may fail to upload before it is retired
+
+
+def note_upload_failure(item, error):
+    queue = load(QUEUE_FILE, {"clips": []})
+    for q in queue["clips"]:
+        if q["external_id"] == item["external_id"]:
+            q["upload_failures"] = q.get("upload_failures", 0) + 1
+            if q["upload_failures"] >= MAX_UPLOAD_FAILURES:
+                q["status"] = "failed"
+                notify("PURSUIT autopilot", f"Gave up on {item['clip']['folder']} after {MAX_UPLOAD_FAILURES} failed uploads: {error}")
+            else:
+                log(f"  Upload failed for {item['clip']['folder']} ({q['upload_failures']}/{MAX_UPLOAD_FAILURES}); trying other clips: {error}")
+    save(QUEUE_FILE, queue)
+
+
 def fill_schedule():
     """Keep SCHEDULE_AHEAD queued clips scheduled on Post for Me. Only when auto-posting was explicitly enabled."""
     cfg = load(CONFIG_FILE, {})
@@ -981,8 +1001,11 @@ def fill_schedule():
             break
         tried.add(picks[0]["external_id"])
         when = queue_slots(load(LEDGER_FILE, {"posts": []}), 1)[0]
-        if schedule_from_queue(picks[0], when):
-            count += 1
+        try:
+            if schedule_from_queue(picks[0], when):
+                count += 1
+        except MediaError as e:     # one bad file must not block every other clip
+            note_upload_failure(picks[0], e)
     return count
 
 
