@@ -256,17 +256,33 @@ def build_prompt(meta, transcript):
 
 
 def extract_json(text):
-    """Find and validate the first complete clip object in a CLI or pasted reply."""
+    """Find the last valid clip object in a reply.
+
+    Models sometimes correct themselves mid-reply ("disregard the above"),
+    so the final valid object wins and broken earlier ones are ignored.
+    """
     decoder = json.JSONDecoder()
     last_error = None
-    for match in re.finditer(r"\{", text):
+    good = None
+    pos = 0
+    while True:
+        i = text.find("{", pos)
+        if i < 0:
+            break
         try:
-            data, _ = decoder.raw_decode(text[match.start():])
+            data, used = decoder.raw_decode(text[i:])
         except json.JSONDecodeError as e:
             last_error = e
+            pos = i + 1
             continue
-        return validate_analysis(data)
-    raise ValueError(f"no valid clip JSON object in reply{f' ({last_error})' if last_error else ''}")
+        try:
+            good = validate_analysis(data)
+        except ValueError as e:
+            last_error = e
+        pos = i + max(used, 1)
+    if good is None:
+        raise ValueError(f"no valid clip JSON object in reply{f' ({last_error})' if last_error else ''}")
+    return good
 
 
 def validate_analysis(data):

@@ -24,6 +24,13 @@ class PursuitClipsTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "start_words"):
             pc.extract_json('{"clips":[{"start":1,"end":12,"end_words":"done","overall":80}]}')
 
+    def test_extract_json_uses_the_last_valid_object_when_the_model_corrects_itself(self):
+        good = lambda t: '{"clips":[{"start":%s,"end":%s,"start_words":"a","end_words":"b","overall":80}]}' % (t, t + 30)
+        reply = good(10) + '\n{"clips":[{"start_note":"placeholder"}]}\nDisregard both. Final:\n' + good(500)
+        self.assertEqual(pc.extract_json(reply)["clips"][0]["start"], 500.0)
+        broken_first = '{"clips":[{"start_note":"x"}]}\n' + good(20)
+        self.assertEqual(pc.extract_json(broken_first)["clips"][0]["start"], 20.0)
+
     def test_snap_does_not_cut_into_first_or_next_word(self):
         words = [
             {"w": "before", "s": 0.0, "e": 0.95},
