@@ -186,3 +186,15 @@ Keep this guide's snapshot updated whenever a service, schedule, price assumptio
 ## Source Links
 
 For current prices and official setup: [Post for Me](https://www.postforme.dev/pricing), [R2](https://developers.cloudflare.com/r2/pricing/), [Workers](https://developers.cloudflare.com/workers/platform/pricing/), [GitHub Free](https://docs.github.com/en/get-started/learning-about-github/githubs-plans), [Spotify for Creators](https://creators.spotify.com/features/podcast).
+
+## Shorts pipeline recovery — November 10, 2026
+
+The Post for Me subscription was restored and the existing API key and pinned TikTok/YouTube connections worked again. Published October Shorts were reconciled before creating new posts.
+
+`install_autopilot.sh` now stages the Python source, font and prompt in `~/Library/Application Support/PURSUIT_AUTOPILOT/runtime`, with a separate local environment in `venv-local`. New rendered clips and the live status file are in `~/Library/Application Support/PURSUIT_AUTOPILOT/clips`. This avoids the file-read/copy stalls reproduced in the Documents environment. The repository remains the editable source; rerun the installer after source changes. The installer installs the declared requirements into the local environment.
+
+TikTok retains 09:00, 15:00 and 21:00 Denver slots, now buffering up to nine posts (three days). YouTube retains Monday/Wednesday/Friday at 05:00, buffering up to twelve Shorts. Empty slots are skipped when quality-approved clips are unavailable. Old back-catalog rendering is disabled in the live configuration; discovery still processes missed recent uploads newest first, one per run. Spotify/RSS settings are unchanged.
+
+The launch agent checks at 07:15, 10:15, 13:15, 16:15, 19:15 and 22:15 while the Mac is available. Local processing still needs an awake, online Mac and valid Codex/Post for Me access. Remote queues keep publishing when the Mac is off. A scheduled post is not proof of public publication; check the remote result and real URL.
+
+The first live recovery run also exposed an inherited `gpt-5.5` default that Codex rejected. The pipeline now explicitly selects `gpt-6.1-sol` unless `PURSUIT_CODEX_MODEL` is supplied, leaving desktop settings alone. Official OpenAI documentation confirms GPT-5.5 retired for ChatGPT-authenticated Codex on October 14, 2026: https://learn.chatgpt.com/docs/models#GPT-5.5-retirement.

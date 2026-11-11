@@ -1,5 +1,7 @@
 # PURSUIT Spotify Setup and External RSS Reference
 
+**Browser publication checklist:** Read [SPOTIFY_BROWSER_WORKFLOW.md](SPOTIFY_BROWSER_WORKFLOW.md) for the saved end-to-end routine, exact YouTube metadata checks, duplicate prevention, and the verified October 16 publication.
+
 **Current chosen route:** keep Spotify hosting. [The real 8:48 episode](https://open.spotify.com/episode/2edCtALCfvqG6gR5WlwqsH) is confirmed Published as Video on its original episode ID. An assisted 55-episode talk-catalog backfill is in progress. Repeating dashboard uploads unattended is still an engineering task. No redirect was applied, and the Cloudflare publishing branch remains OFF. The instructions below describe optional external RSS, not a required step for direct Spotify uploads.
 
 **Current routine:** the test episode is deleted. `./autopilot podcast-prepare latest --download` now prepares full video as `episode.mp4` plus details. Upload it to the existing show, then verify Published, Video and public playback. For an already-published audio episode, replace it with video rather than creating another episode. Add `--format audio` for MP3 fallback. There is no recurring Spotify uploader or upload schedule yet. Keep Spotify hosting; Anya completes Monetize eligibility/application/payout/ad-break steps herself. Eligible video supports Premium video revenue as well as ads; MP3 does not support Premium video revenue. See [current workflow](PROJECT_GUIDE.md#current-spotify-publication-and-next-steps).
