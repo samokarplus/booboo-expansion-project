@@ -23,6 +23,7 @@ import datetime as dt
 import fcntl
 import json
 import os
+import shutil
 import re
 import subprocess
 import sys
@@ -65,10 +66,12 @@ TIKTOK_API = os.environ.get("PURSUIT_TIKTOK_API", "https://open.tiktokapis.com")
 QUEUE_FILE = STATE_DIR / "queue.json"      # approved clips waiting to be posted
 POST_HOURS = [9, 15, 21]       # maximum three posts/day, local time; empty slots stay empty
 SCHEDULE_AHEAD = 21            # keep a week scheduled ahead so posts continue while the Mac is off; still only 09:00, 15:00, 21:00
-BACKLOG_PER_RUN = 1            # old episodes processed per scheduled run
+BACKLOG_PER_RUN = 2            # older episodes processed per scheduled run
 BACKLOG_TARGET = 30            # keep catching up on recent episodes until about ten days of approved clips are waiting
 RETRY_AFTER_DAYS = 7           # episodes that failed MAX_ATTEMPTS times get another chance after this
-MAX_EPISODE_AGE_DAYS = 30      # TikTok is for the recent, filmed version of the podcast
+MAX_EPISODE_AGE_DAYS = 30      # how long finished clip files are kept for YouTube reuse (disk cleanup only)
+LIBRARY_AGE_DAYS = 365         # episodes this recent are eligible: the whole library, newest first
+MIN_FREE_GB = 3                # skip heavy work (download/render) when the Mac is this low on disk
 
 # --- policy ---------------------------------------------------------------------------
 TZ = ZoneInfo(os.environ.get("PURSUIT_TZ", "America/Denver"))
@@ -98,7 +101,7 @@ def clip_length_ok(clip):
 
 
 def recent_visual_clip(meta, clip):
-    """Only filmed episodes from the last month are eligible for unattended posting."""
+    """Only filmed (moving-video) episodes from the last year are eligible for unattended posting."""
     if clip.get("layout", "video") != "video":
         return False
     raw = meta.get("upload_date")
@@ -108,7 +111,7 @@ def recent_visual_clip(meta, clip):
         uploaded = dt.datetime.strptime(str(raw), "%Y%m%d").date()
     except ValueError:
         return False
-    return now().date() - dt.timedelta(days=MAX_EPISODE_AGE_DAYS) <= uploaded <= now().date()
+    return now().date() - dt.timedelta(days=LIBRARY_AGE_DAYS) <= uploaded <= now().date()
 
 
 def log(msg):
@@ -825,6 +828,9 @@ def process_episode(ep, state, dry_run, use_claude=True, fresh=True):
     """Render, check and add the good clips to the approved queue. Posting happens from the queue (fill_schedule)."""
     if use_claude and not llm_available():
         raise Transient("The AI (Codex) is unavailable right now; will process later (no attempt used).")
+    free_gb = shutil.disk_usage(STATE_DIR if STATE_DIR.exists() else Path.home()).free / 1e9
+    if free_gb < MIN_FREE_GB:
+        raise Transient(f"Only {free_gb:.1f} GB free on the Mac; skipping heavy work until there is more room (no attempt used).")
     rec = state["episodes"].setdefault(ep["id"], {"title": ep["title"], "attempts": 0})
     rec["attempts"] += 1
     rec["last_attempt"] = now().isoformat()
@@ -863,7 +869,7 @@ def add_to_queue(passed, summary, fresh):
     meta, added = summary["meta"], []
     for clip in passed:
         if not recent_visual_clip(meta, clip):
-            log(f"  SKIP {clip['folder']}: only moving-video episodes from the last {MAX_EPISODE_AGE_DAYS} days are posted.")
+            log(f"  SKIP {clip['folder']}: only moving-video episodes from the last {LIBRARY_AGE_DAYS} days are posted.")
             continue
         eid = ext_id(meta, clip)
         if eid in have:
@@ -992,7 +998,7 @@ def backlog_step(state, limit, use_claude=True):
         baseline_pos = next((i for i, ep in enumerate(eps) if ep["id"] == baseline), None)
         if baseline_pos is not None:
             eps = eps[baseline_pos:]  # newer uploads belong to check_new_episode and retain priority
-    cutoff = now().date() - dt.timedelta(days=MAX_EPISODE_AGE_DAYS)
+    cutoff = now().date() - dt.timedelta(days=LIBRARY_AGE_DAYS)
     eps = [e for e in eps if not e.get("upload_date") or
            dt.datetime.strptime(str(e["upload_date"]), "%Y%m%d").date() >= cutoff]
     todo = [e for e in eps if state["episodes"].get(e["id"], {}).get("status") not in

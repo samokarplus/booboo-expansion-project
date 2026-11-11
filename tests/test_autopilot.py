@@ -308,14 +308,18 @@ class AutopilotTests(unittest.TestCase):
         self.assertEqual(len(ids), len(set(ids)))
         self.assertEqual(len(ids), 6)
 
-    def test_queue_rejects_audio_layout_and_episodes_older_than_a_month(self):
+    def test_queue_rejects_audio_layout_and_episodes_older_than_a_year(self):
         today = ap.now().strftime("%Y%m%d")
         recent = dict(self.summary, meta=dict(self.summary["meta"], upload_date=today))
         video = dict(self.clips[0], layout="video")
         audio = dict(self.clips[1], layout="audio")
         self.assertEqual(ap.add_to_queue([video, audio], recent, fresh=True), [ap.ext_id(recent["meta"], video)])
 
-        old_date = (ap.now() - dt.timedelta(days=31)).strftime("%Y%m%d")
+        older = (ap.now() - dt.timedelta(days=200)).strftime("%Y%m%d")      # the library is eligible
+        mid = dict(self.summary, meta=dict(self.summary["meta"], id="MIDVIDEO123", upload_date=older))
+        self.assertEqual(len(ap.add_to_queue([dict(self.clips[2], layout="video")], mid, fresh=False)), 1)
+
+        old_date = (ap.now() - dt.timedelta(days=ap.LIBRARY_AGE_DAYS + 1)).strftime("%Y%m%d")
         old = dict(self.summary, meta=dict(self.summary["meta"], id="OLDVIDEO123", upload_date=old_date))
         self.assertEqual(ap.add_to_queue([dict(self.clips[2], layout="video")], old, fresh=False), [])
 
