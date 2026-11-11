@@ -130,7 +130,7 @@ def candidates(queue, posts):
         if item["status"] not in ("queued", "scheduled") or \
                 any(active_or_final(p) for p in related_posts(posts, base_id)):
             continue
-        if not ap.recent_visual_clip(item["meta"], clip):
+        if not ap.recent_visual_clip(item["meta"], clip) or not ap.clip_length_ok(clip):
             continue
         if not (Path(item["ep_dir"]) / clip["file"]).is_file():
             continue

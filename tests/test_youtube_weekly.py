@@ -30,7 +30,7 @@ class WeeklyTests(unittest.TestCase):
                 "meta": {"id": "episode", "title": "Episode", "url": "https://youtu.be/episode01",
                          "upload_date": "20261001"},
                 "analysis": {"youtube_title": "Title", "caption": "Caption"},
-                "clip": {"folder": "01_good", "file": "01_good/clip.mp4",
+                "clip": {"folder": "01_good", "duration_sec": 30.0, "file": "01_good/clip.mp4",
                          "start_sec": 10, "end_sec": 50}}
 
     def scheduled_post(self, external_id="pursuit-episode-01_good-youtube-weekly", status="scheduled",

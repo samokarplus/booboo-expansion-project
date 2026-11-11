@@ -141,7 +141,7 @@ class AutopilotTests(unittest.TestCase):
             folder = f"0{i + 1}_clip-{i}"
             (self.ep_dir / folder).mkdir(parents=True, exist_ok=True)
             (self.ep_dir / folder / f"{folder}.mp4").write_bytes(b"x" * 1000)
-            self.clips.append({"folder": folder, "file": f"{folder}/{folder}.mp4", "score": 90 - i, "clip_title": f"Clip {i}",
+            self.clips.append({"folder": folder, "duration_sec": 30.0, "file": f"{folder}/{folder}.mp4", "score": 90 - i, "clip_title": f"Clip {i}",
                                "analysis": {"youtube_title": f"Title {i}", "caption": f"Caption {i}.",
                                             "hashtags": ["running", "#ultra"], "overall": 90 - i}})
         self.summary = {"ep_dir": str(self.ep_dir), "meta": {"id": "VIDEOID1234", "title": "Episode",
@@ -282,6 +282,25 @@ class AutopilotTests(unittest.TestCase):
             third_clips.append(dict(base, folder=folder, file=f"{folder}/{folder}.mp4", score=score))
         ap.add_to_queue(third_clips, third, fresh=False)
 
+    def test_unschedule_cancels_remote_posts_clears_the_ledger_and_never_reuses_the_clip(self):
+        self.tiktok_only()
+        cfg = ap.load(ap.CONFIG_FILE, {})
+        ap.save(ap.CONFIG_FILE, dict(cfg, auto_posting=True))
+        self.queue_two_episodes()
+        ap.fill_schedule()
+        before = len(FakePostForMe.posts)
+        ledger = ap.load(ap.LEDGER_FILE, {"posts": []})
+        target = next(p for p in ledger["posts"] if "clip-0" in p["external_id"])
+        args = type("A", (), {"clip": "01_clip-0", "episode": None})
+        ap.cmd_unschedule(args)
+        self.assertEqual(len(FakePostForMe.posts), before - 1)
+        self.assertNotIn(target["post_id"], FakePostForMe.posts)
+        self.assertFalse([p for p in ap.load(ap.LEDGER_FILE, {})["posts"] if "clip-0" in p["external_id"]])
+        removed = [q for q in ap.load(ap.QUEUE_FILE, {})["clips"] if "clip-0" in q["clip"]["file"]]
+        self.assertTrue(removed and all(q["status"] == "removed" for q in removed))
+        queue = ap.load(ap.QUEUE_FILE, {})
+        self.assertFalse([q for q in queue["clips"] if "clip-0" in q["clip"]["file"] and q["status"] != "removed"])
+
     def test_queue_never_holds_duplicates(self):
         self.queue_two_episodes()
         self.queue_two_episodes()
@@ -317,7 +336,10 @@ class AutopilotTests(unittest.TestCase):
         cfg = ap.load(ap.CONFIG_FILE, {})
         ap.save(ap.CONFIG_FILE, dict(cfg, auto_posting=True))
         self.queue_two_episodes()
-        self.assertEqual(ap.fill_schedule(), ap.SCHEDULE_AHEAD)
+        # Nine available clips exercise the full three-day buffer, not just a six-clip fixture.
+        fourth = dict(self.summary, meta=dict(self.summary["meta"], id="FOURTHVID01", title="Fourth"))
+        ap.add_to_queue(self.clips, fourth, fresh=False)
+        self.assertEqual(ap.fill_schedule(), 9)
         self.assertEqual(ap.fill_schedule(), 0)   # already enough ahead: nothing more, nothing twice
         posts = sorted(ap.load(ap.LEDGER_FILE, {})["posts"], key=lambda p: p["scheduled_at"])
         self.assertEqual(len({p["external_id"] for p in posts}), len(posts))
@@ -471,7 +493,7 @@ class AutopilotTests(unittest.TestCase):
         args = type("A", (), {"dry_run": False, "no_claude_qc": False})
         with patch("autopilot.latest_episodes", side_effect=ap.Stop("YouTube unreachable")):
             ap.cmd_run(args)
-        self.assertEqual(len(FakePostForMe.posts), ap.SCHEDULE_AHEAD)
+        self.assertEqual(len(FakePostForMe.posts), min(6, ap.SCHEDULE_AHEAD))
         self.assertIn("STOPPED", ap.STATUS_FILE.read_text())
 
     def test_ai_outage_does_not_use_up_attempts(self):
@@ -512,7 +534,7 @@ class AutopilotTests(unittest.TestCase):
             run.return_value.returncode = 0          # launchd agent is installed
             ap.cmd_auto_post(args)
         self.assertTrue(ap.load(ap.CONFIG_FILE, {})["auto_posting"])
-        self.assertEqual(len(FakePostForMe.posts), 1 + ap.SCHEDULE_AHEAD)
+        self.assertEqual(len(FakePostForMe.posts), 1 + min(5, ap.SCHEDULE_AHEAD))
 
     def test_an_ordinary_post_cannot_unlock_auto_posting(self):
         self.tiktok_only()
@@ -750,14 +772,14 @@ class TechnicalCheckTests(unittest.TestCase):
         cls.dir = TMP / "tech" / "01_test"
         cls.dir.mkdir(parents=True, exist_ok=True)
         cls.mp4 = cls.dir / "01_test.mp4"
-        subprocess.run([cls.ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=15",
-                        "-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000:duration=15",
+        subprocess.run([cls.ffmpeg, "-y", "-v", "error", "-f", "lavfi", "-i", "testsrc2=s=1080x1920:r=30:d=25",
+                        "-f", "lavfi", "-i", "sine=frequency=300:sample_rate=48000:duration=25",
                         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-shortest", str(cls.mp4)], check=True)
         (cls.dir / "copy.txt").write_text("x")
-        cls.words = [{"w": f"w{i}", "s": 10 + i * 0.4, "e": 10 + i * 0.4 + 0.3} for i in range(40)]
+        cls.words = [{"w": f"w{i}", "s": 10 + i * 0.4, "e": 10 + i * 0.4 + 0.3} for i in range(60)]
 
-    def clip(self, start=9.9, end=24.75):
-        return {"file": "01_test/01_test.mp4", "folder": "01_test", "duration_sec": 15.0,
+    def clip(self, start=9.9, end=34.75):
+        return {"file": "01_test/01_test.mp4", "folder": "01_test", "duration_sec": 25.0,
                 "start_sec": start, "end_sec": end}
 
     def test_good_clip_passes(self):
@@ -793,3 +815,19 @@ class TechnicalCheckTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LengthRuleTests(unittest.TestCase):
+    def test_only_20_to_60_second_clips_are_eligible(self):
+        for good in (20.0, 35.5, 60.0):
+            self.assertTrue(ap.clip_length_ok({"duration_sec": good}), good)
+        for bad in (14.0, 19.9, 60.1, 90, None, "x"):
+            self.assertFalse(ap.clip_length_ok({"duration_sec": bad}), bad)
+
+    def test_a_clip_approved_under_the_old_12_to_90_rule_is_never_picked(self):
+        def item(name, dur, score):
+            return {"status": "queued", "external_id": f"x-{name}", "score": score, "episode": "E", "category": None,
+                    "meta": {}, "clip": {"duration_sec": dur, "layout": "video", "file": f"{name}/{name}.mp4"}}
+        queue = {"clips": [item("short", 14.0, 95), item("long", 80.0, 94), item("ok", 25.0, 70)]}
+        picks = ap.pick_next(queue, {"posts": []}, 3)
+        self.assertEqual([p["external_id"] for p in picks], ["x-ok"])

@@ -64,9 +64,9 @@ PINNED_PLATFORMS = {"tiktok"}
 TIKTOK_API = os.environ.get("PURSUIT_TIKTOK_API", "https://open.tiktokapis.com")
 QUEUE_FILE = STATE_DIR / "queue.json"      # approved clips waiting to be posted
 POST_HOURS = [9, 15, 21]       # maximum three posts/day, local time; empty slots stay empty
-SCHEDULE_AHEAD = 3             # keep one full day scheduled ahead (Post for Me works while the Mac sleeps)
+SCHEDULE_AHEAD = 21            # keep a week scheduled ahead so posts continue while the Mac is off; still only 09:00, 15:00, 21:00
 BACKLOG_PER_RUN = 1            # old episodes processed per scheduled run
-BACKLOG_TARGET = 12            # stop while roughly four days of approved clips are waiting at the ceiling
+BACKLOG_TARGET = 30            # keep catching up on recent episodes until about ten days of approved clips are waiting
 RETRY_AFTER_DAYS = 7           # episodes that failed MAX_ATTEMPTS times get another chance after this
 MAX_EPISODE_AGE_DAYS = 30      # TikTok is for the recent, filmed version of the podcast
 
@@ -78,7 +78,7 @@ MAX_CLIPS_POST = 7             # a week's worth
 MIN_POST_SCORE = 70            # the AI's overall score needed to publish
 MIN_STANDALONE = 7             # clip must make sense without context
 MIN_EPISODE_MINUTES = 6        # shorter uploads are vlogs/trailers, not episodes
-MIN_CLIP_SEC, MAX_CLIP_SEC = 12, 90
+MIN_CLIP_SEC, MAX_CLIP_SEC = 20, 60   # Samo/Anya: the best 20-60 second moments
 MAX_FAIL_FRACTION = 0.5        # if more than half the clips fail checks, trust nothing from this episode
 MAX_ATTEMPTS = 3               # retries per episode before giving up (and telling you)
 
@@ -87,6 +87,14 @@ MAX_ATTEMPTS = 3               # retries per episode before giving up (and telli
 
 def now():
     return dt.datetime.now(TZ)
+
+
+def clip_length_ok(clip):
+    """A clip approved under an older, looser length rule is never scheduled: 20-60 seconds only."""
+    try:
+        return MIN_CLIP_SEC <= float(clip.get("duration_sec")) <= MAX_CLIP_SEC
+    except (TypeError, ValueError):
+        return False
 
 
 def recent_visual_clip(meta, clip):
@@ -874,7 +882,7 @@ def pick_next(queue, ledger, n):
     """Best clips first, but new-episode clips get a boost and we avoid repeating an episode/topic back to back."""
     posted = {p["external_id"] for p in ledger["posts"]}
     pool = [q for q in queue["clips"] if q["status"] == "queued" and q["external_id"] not in posted
-            and recent_visual_clip(q.get("meta") or {}, q.get("clip") or {})]
+            and recent_visual_clip(q.get("meta") or {}, q.get("clip") or {}) and clip_length_ok(q.get("clip") or {})]
     history = sorted(ledger["posts"], key=lambda p: p["scheduled_at"])[-3:]
     recent_eps = [p.get("episode") for p in history]
     recent_cats = [p.get("category") for p in history]
@@ -1433,6 +1441,50 @@ def _cmd_auto_post_locked(args):
           f"(keeping {SCHEDULE_AHEAD} scheduled ahead).")
 
 
+def cmd_unschedule(args):
+    """Cancel scheduled posts for clips whose folder name contains args.clip: deletes them on Post for Me (TikTok and YouTube),
+    removes them from both ledgers, and marks the clips removed so they are never picked again. Posts that already went out are left alone."""
+    import youtube_weekly as yw
+    with open(LOCK_FILE, "w") as lock:
+        while True:   # wait for any running pass to finish rather than editing state under it
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                time.sleep(5)
+        queue = load(QUEUE_FILE, {"clips": []})
+        hits = [q for q in queue["clips"] if args.clip in q["clip"]["file"] and (not args.episode or q["episode"] == args.episode)]
+        if not hits:
+            raise Stop(f"No queued clip matches {args.clip!r}.")
+        removed = 0
+        for led_file in (LEDGER_FILE, yw.LEDGER_FILE):
+            ledger = load(led_file, {"posts": []})
+            keep = []
+            for p in ledger["posts"]:
+                mine = any(p.get("external_id", "").startswith(q["external_id"]) for q in hits)
+                if not mine:
+                    keep.append(p)
+                elif p.get("status") in ("posted", "processed"):
+                    keep.append(p)
+                    log(f"unschedule: {p['external_id']} already went out; left alone.")
+                else:
+                    if p.get("post_id"):
+                        try:
+                            api("DELETE", f"/v1/social-posts/{p['post_id']}")
+                        except (Stop, Ambiguous, Transient) as e:
+                            raise Stop(f"Could not cancel {p['external_id']} on Post for Me ({e}); nothing else was changed.")
+                    removed += 1
+                    log(f"unschedule: cancelled {p['external_id']} ({p.get('scheduled_at')})")
+            ledger["posts"] = keep
+            save(led_file, ledger)
+        for q in hits:
+            if q["status"] in ("queued", "scheduled"):
+                q["status"] = "removed"
+        save(QUEUE_FILE, queue)
+        write_status()
+        print(f"Cancelled {removed} scheduled post(s) for {len(hits)} clip(s).")
+
+
 def cmd_auto_post(args):
     """Change posting state under the same lock used by launchd and manual processing."""
     STATE_DIR.mkdir(parents=True, exist_ok=True)
@@ -1571,6 +1623,9 @@ def main():
     da.add_argument("state", choices=["on", "off"])
     import podcast_distribution as pd
     pd.add_cli(sub)
+    un = sub.add_parser("unschedule", help="cancel scheduled posts (TikTok and YouTube) for a clip and never use it again")
+    un.add_argument("clip", help="part of the clip's folder name, e.g. 03_my-grandma")
+    un.add_argument("--episode", help="YouTube video id, if the name alone is ambiguous")
     a = sub.add_parser("auto-post", help="turn scheduled posting from the queue on/off")
     a.add_argument("state", choices=["on", "off"])
     args = ap.parse_args()
@@ -1597,6 +1652,8 @@ def main():
         elif args.cmd in ("podcast-setup", "podcast-publish", "podcast-prepare", "podcast-run", "podcast-source", "podcast-auto", "podcast-status", "podcast-rss"):
             import podcast_distribution as pd
             pd.dispatch(args)
+        elif args.cmd == "unschedule":
+            cmd_unschedule(args)
         elif args.cmd == "auto-post":
             cmd_auto_post(args)
         elif args.cmd == "status":
