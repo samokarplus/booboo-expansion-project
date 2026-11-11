@@ -876,16 +876,16 @@ if __name__ == "__main__":
 
 
 class LengthRuleTests(unittest.TestCase):
-    def test_only_20_to_60_second_clips_are_eligible(self):
-        for good in (20.0, 35.5, 60.0):
+    def test_only_15_to_60_second_clips_are_eligible(self):
+        for good in (15.0, 16.1, 35.5, 60.0):
             self.assertTrue(ap.clip_length_ok({"duration_sec": good}), good)
-        for bad in (14.0, 19.9, 60.1, 90, None, "x"):
+        for bad in (12.0, 14.9, 60.1, 90, None, "x"):
             self.assertFalse(ap.clip_length_ok({"duration_sec": bad}), bad)
 
     def test_a_clip_approved_under_the_old_12_to_90_rule_is_never_picked(self):
         def item(name, dur, score):
             return {"status": "queued", "external_id": f"x-{name}", "score": score, "episode": "E", "category": None,
                     "meta": {}, "clip": {"duration_sec": dur, "layout": "video", "file": f"{name}/{name}.mp4"}}
-        queue = {"clips": [item("short", 14.0, 95), item("long", 80.0, 94), item("ok", 25.0, 70)]}
+        queue = {"clips": [item("short", 12.0, 95), item("long", 80.0, 94), item("ok", 25.0, 70)]}
         picks = ap.pick_next(queue, {"posts": []}, 3)
         self.assertEqual([p["external_id"] for p in picks], ["x-ok"])

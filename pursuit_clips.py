@@ -367,22 +367,22 @@ def analyze(meta, transcript, work, mode):
         if len(best["clips"]) >= MIN_GOOD_CANDIDATES:
             break
         spans = ", ".join(f"{c['start']:.0f}-{c['end']:.0f}s ({c['end'] - c['start']:.0f}s long)" for c in bad)
-        ask = (prompt + "\n\nIMPORTANT: respond with ONLY the JSON object. Every clip must be between 20 and 60 seconds "
+        ask = (prompt + "\n\nIMPORTANT: respond with ONLY the JSON object. Every clip must be between 15 and 60 seconds "
                "long (end minus start). " + (f"These were out of range and are dropped: {spans}. " if spans else "")
-               + "Look again for more strong 20-60 second moments and return the full list.")
+               + "Look again for more strong 15-60 second moments and return the full list.")
     if best and best["clips"]:
         write_json_atomic(out, best, indent=2)
         return best
-    raise Fail(f"Couldn't get usable 20-60 second clips from the AI ({last_err or 'none were in range'}). "
+    raise Fail(f"Couldn't get usable 15-60 second clips from the AI ({last_err or 'none were in range'}). "
                f"Raw reply saved in {work}.")
 
 
-MIN_GOOD_CANDIDATES = 3      # ask the AI once more if fewer than this many clips are 20-60 seconds
-PICK_MIN_SEC, PICK_MAX_SEC = 21, 58   # tighter than 20-60: snapping to word boundaries can stretch a cut by a couple of seconds
+MIN_GOOD_CANDIDATES = 3      # ask the AI once more if fewer than this many clips are 15-60 seconds
+PICK_MIN_SEC, PICK_MAX_SEC = 16, 58   # tighter than 15-60: snapping to word boundaries can stretch a cut by a couple of seconds
 
 
 def split_by_length(data):
-    """(analysis with only 21-58 second picks so the final cut is 20-60, list of the clips dropped for length)."""
+    """(analysis with only 16-58 second picks so the final cut is 15-60, list of the clips dropped for length)."""
     good, bad = [], []
     for clip in data["clips"]:
         span = clip["end"] - clip["start"]

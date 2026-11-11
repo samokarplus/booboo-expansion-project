@@ -9,7 +9,7 @@ Your job: read the ENTIRE episode transcript below and find the moments that wou
 - Contains at least one of: a strong opinion, a surprising or counterintuitive statement, a personal story, a vulnerable/emotional moment, a relationship insight, a running/endurance insight, ambition, purpose, fear, discipline, genuine humor, or concrete useful advice.
 - Has a payoff. It ends on the point, the punchline, or the emotional beat, not mid-thought and not trailing off into the next topic.
 - Read the proposed first and last sentence together as a standalone edit before selecting it. Reject or adjust any cut that sounds like it entered late or left early.
-- Between 20 and 60 seconds, always. Aim for roughly 25–50. Never shorter than 20 and never longer than 60: if a moment does not fit in that window with a complete thought, choose another moment.
+- Between 15 and 60 seconds, always. Aim for roughly 25–50; shorter is fine if the moment is strong. Never shorter than 15 and never longer than 60: if a moment does not fit in that window with a complete thought, choose another moment.
 
 ## Avoid
 - Intros, outros, "welcome back", housekeeping, subscribe/like requests, sponsor-type material.

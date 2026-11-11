@@ -81,7 +81,7 @@ MAX_CLIPS_POST = 7             # a week's worth
 MIN_POST_SCORE = 70            # the AI's overall score needed to publish
 MIN_STANDALONE = 7             # clip must make sense without context
 MIN_EPISODE_MINUTES = 6        # shorter uploads are vlogs/trailers, not episodes
-MIN_CLIP_SEC, MAX_CLIP_SEC = 20, 60   # Samo/Anya: the best 20-60 second moments
+MIN_CLIP_SEC, MAX_CLIP_SEC = 15, 60   # Samo: about 20-60s is the target, but 15s+ is fine (loose suggestion)
 MAX_FAIL_FRACTION = 0.5        # if more than half the clips fail checks, trust nothing from this episode
 MAX_ATTEMPTS = 3               # retries per episode before giving up (and telling you)
 
@@ -93,7 +93,7 @@ def now():
 
 
 def clip_length_ok(clip):
-    """A clip approved under an older, looser length rule is never scheduled: 20-60 seconds only."""
+    """A clip approved under an older, looser length rule is never scheduled: 15-60 seconds only."""
     try:
         return MIN_CLIP_SEC <= float(clip.get("duration_sec")) <= MAX_CLIP_SEC
     except (TypeError, ValueError):

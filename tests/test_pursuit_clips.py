@@ -57,11 +57,11 @@ class PursuitClipsTests(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
     def test_analyze_asks_once_more_when_too_few_clips_are_in_range(self):
-        data, calls = self._analyze_with([self._reply([(0, 16), (20, 105)]),
+        data, calls = self._analyze_with([self._reply([(0, 10), (20, 105)]),
                                           self._reply([(0, 30), (50, 90), (120, 150)])])
         self.assertEqual(len(data["clips"]), 3)
         self.assertEqual(len(calls), 2)
-        self.assertIn("between 20 and 60 seconds", calls[1])
+        self.assertIn("between 15 and 60 seconds", calls[1])
 
     def test_analyze_keeps_the_good_clips_if_the_retry_is_worse(self):
         data, calls = self._analyze_with([self._reply([(0, 30), (50, 90)]), self._reply([(0, 5)])])

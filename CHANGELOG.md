@@ -2,6 +2,10 @@
 
 Short, plain notes. Newest first.
 
+## 2026-11-11
+
+- **Minimum clip length is now 15s** (was 20s). Max stays 60s. Clips of 15–20s that already passed QC can be scheduled.
+
 ## 2026-11-10
 
 - **Clips are now 20–60 seconds.** Shorter or longer clips are never posted.
